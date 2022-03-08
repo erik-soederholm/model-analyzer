@@ -180,6 +180,7 @@ class MetaModelGenerator:
             
             
             all_attr_candidates = dict()
+            side_to_class_table = dict()
             for _class, side, input_bound_attr_refs, bound_rename_attr in source_classes:
                 bound_attr_refs = set()
                 bound_camal_table = dict()
@@ -195,6 +196,7 @@ class MetaModelGenerator:
                         bound_ref_has_id_attr = True
                         
                 class_name = _class['name']
+                side_to_class_table[side] = class_name
                 convert_id = False
                 if not free_ref_has_id_attr and not bound_ref_has_id_attr:
                     if class_name.lower() not in map((lambda d : d['name'].lower()), _class['attributes']):
@@ -290,17 +292,16 @@ class MetaModelGenerator:
                 best_score = min(score_table.keys())
                 best_score_list = score_table[best_score]
                 if len(best_score_list) > 1:
-                    #raise ManaException() # multipple attr sources
-                    print('warning!!')
+                    raise ManaException() # multipple attr sources
                 class_data_dict = best_score_list[0]
                 out = [{
-                    'class_name' : class_name,
+                    'class_name' : side_to_class_table[side],
+                    'side' : side,
                     'id' : _id,
-                    'source_to_ref_attr_map' : trans_table }
-                       for class_name, (_id, trans_table, unknown_table) in class_data_dict.items()]
+                    'ref_source_to_attr_map' : trans_table }
+                       for side, (_id, trans_table, unknown_table) in class_data_dict.items()]
             else:
-                #raise ManaException() # can not find attr source
-                out = 9
+                raise ManaException() # can not find attr source
             return out
                                 
         saved_referential = dict()
