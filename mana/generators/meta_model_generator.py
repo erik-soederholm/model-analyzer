@@ -132,16 +132,6 @@ class MetaModelGenerator:
                 return_data['attr_source'] = nav_data['ref_name']
             
             return return_data
-            # skapa en (rel, class, phrase) => id table
-            # behöver en funktion för att hitta alla classer som sitter ihop med en relation
-            # om relation är given:
-            # - minsa urvaler till giltig relation
-            # 
-            # förutsätts det handla om en icke assoc rel vilket ger en direkt mappning
-            # om path är given så:
-            #  - är det inte en generalisation
-            #  - behöver man gå igenom alla relationer för att hitta en mappning som är ok
-            # om class är given 
         
         for class_name, _class in class_table.items():
             for attr in _class['attributes']:
@@ -264,13 +254,7 @@ class MetaModelGenerator:
                     candidate_list = [[prev_attr_candidates | attr_data[0], prev_data | {key : (_id, dict(attr_data[1]), attr_data[2])}] 
                                       for _id, attr_data in value.items()
                                       for prev_attr_candidates, prev_data in candidate_list]
-            '''
-            if len(all_attr_candidates) == 2:
-                secound = all_attr_candidates.values()[1]
-                candidate_list = [[x[1] | y[1], {first[0] : x , secound[0] : y}] for x in first[1] for y in secound[1]]
-            else:
-                candidate_list = [[x[1], {first[0] : x}] for x in first[1]]
-            '''
+
             score_table = dict()
             
             for option in candidate_list:
@@ -301,17 +285,7 @@ class MetaModelGenerator:
                             if score not in score_table:
                                 score_table[score] = []
                             score_table[score].append(option[1])
-                        '''
-                        if score == 0:
-                            my_camal_table = camal_table # ref ok
-                        else:
-                            my_camal_table = dict(camal_table) # copy
-                            attr_to_rename = attr_sources - free_attr_refs # This is not the correct way
-                            my_camal_table[attr_to_rename.pop()] = my_camal_table.pop(remainder.pop())
-                        if score not in score_table:
-                            score_table[score] = []
-                        score_table[score].append((my_camal_table, option[1]))
-                        '''
+
             if len(score_table) > 0:
                 best_score = min(score_table.keys())
                 best_score_list = score_table[best_score]
@@ -328,80 +302,7 @@ class MetaModelGenerator:
                 #raise ManaException() # can not find attr source
                 out = 9
             return out
-                    
-            id_def = id(source_class)
-            correct_size = set()
-            attr_size = len(attr_refs)
-            for option in id_def['defined']:
-                if len(id_def['inclusion'][option]) == attr_size:
-                    correct_size |= {option}
-            if len(correct_size) == 0:
-                raise ManaException() # No reight size id!
-            
-            id_to_trans_table = dict()
-            for id_candidate in correct_size:
-                trans_table = dict()
-                for attr_candidate in id_def['inclusion'][id_candidate]:
-                    if attr_candidate in attr_refs:
-                        trans_table[attr_candidate] = attr_candidate
-                id_to_trans_table[id_candidate] = trans_table
-            
-            
-            winner = dict()
-            for _id, trans_table in id_to_trans_table.items():
-                if len(trans_table) >= attr_size:
-                    winner = _id
-                    break
-                if len(trans_table) >= attr_size - 1:
-                    winner[_id] = 1
-                    missing_attr_ref = (attr_refs - trans_table.keys()).pop()
-                    if missing_attr_ref.upper() == 'ID':
-                        missing_attr_source = (set(id_def['inclusion'][_id]) - trans_table.keys()).pop()
-                        if missing_attr_source == ref_class['name']:
-                
-                            raise ManaException() # No id found!
-                             
-                        
-
-            return
-                        
-            #trans_table[attr_refs - out.keys()] = remaining_source
-                
-            '''
-            if score >= attr_size:
-                winner_list = [id_candidate]
-                    break
-                elif score >= attr_size - 1:
-                    winner_list.append(id_candidate)
-            
-            extra_check = len(winner_list) > 1
-            
-            if len(winner_list) > 1:
-                
-                
-            if len(winner_list) is None:
-             
-                
-                
-                raise ManaException() # No id found!
-            '''
-            out = dict()
-            remaining_source = None
-            for source_attr in id_def['inclusion'][id_candidate]:
-                if source_attr in attr_refs:
-                    out[source_attr] = source_attr
-                else:
-                    remaining_source = source_attr
-            if remaining_source is not None:
-                out[attr_refs - out.keys()] = remaining_source
-            
-                    
-            
-                         
-                print('')#for id_def['inclusion'][]
-                
-            print('foo')
-                
+                                
         saved_referential = dict()
         def referential(input : dict()):
             class_name = input['name']
@@ -491,20 +392,10 @@ class MetaModelGenerator:
                     
                     source_data = []
                     for side, source_class_name in source_table.items():
-                        source_data.append([class_table[source_class_name], side, bound_attr[side], bound_rename_table[side]])
+                        source_data.append([class_table[source_class_name], 
+                                            side, bound_attr[side], 
+                                            bound_rename_table[side]])
                     Id = id_as_attr_ref(source_data, input, free_attr, general_rename_table)
-                    
-                    
-                                    
-                    '''
-                    
-                    if 't_side' in relation_table[rnum]:
-                        pass #for 
-                    source_list = [[class_table[class_name], []] for class_name in rel_other_end(rnum, class_name) ]
-                    attr_refs = inclusion_table[rnum]
-                    Id = id_as_attr_ref(source_list, input, attr_refs)
-                    ''' 
-                
                            
                 pp = pprint.PrettyPrinter(indent=2)
                 pp.pprint(output)
@@ -530,5 +421,3 @@ class MetaModelGenerator:
             text_file.write(output)
         
         #print(output)            
-    
-        
