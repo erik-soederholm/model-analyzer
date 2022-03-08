@@ -1,0 +1,127 @@
+from pyDatalog import pyDatalog 
+
+pyDatalog.create_terms('instance', 'instance_id', 'no_condition')
+
++no_condition() #Adding no_condition as a valid 'True' awser..
+
+{% for subsystem in subsystems %}
+# Subsystem: {{subsystem.name.subsys_name}}
+
+{% for class in subsystem.classes %}
+# Class: {{code_name(class.name)}}
+{% macro a_num()%}
+A{{ class.cnum }}_
+{%- endmacro %}
+{% macro var_attr_as_text()%}
+{% for attribute in class.attributes %}
+'{{ a_num() }}{{ code_name(attribute.name) }}'{{ ",\n" if not loop.last }}
+{%- endfor %} 
+{%- endmacro %}
+{% macro attr_table()%}
+{% for attribute in class.attributes %}
+'{{ attribute.name }}' : {{ a_num() }}{{ code_name(attribute.name) }}{{ ",\n" if not loop.last }}
+{%- endfor %} 
+{%- endmacro %}
+{% macro constraint(rnum)%}
+{% for attribute in referential(class).inclusion[rnum] %}
+({{ a_num() }}{{ code_name(attribute) }} == l_{{ code_name(attribute) }}){{ "\n& " if not loop.last }}
+{%- else %}
+no_condition()
+{%- endfor %}
+{%- endmacro %}
+{% macro instance()%}
+instance('{{ domain }}',
+         '{{ class.name }}',
+{% for attribute in class.attributes %}
+          {{ a_num() }}{{ code_name(attribute.name)}}{{ ")" if loop.last else ",\n" }}
+{%- endfor %}
+{%- endmacro %}
+{% macro dummy_instance()%}
+instance('{{ domain }}',
+         '{{ class.name }}',
+{% for attribute in class.attributes %}
+          ''{{ ")" if loop.last else ",\n" }}
+{%- endfor %}
+{%- endmacro %}
+{% macro instance_id(at_id)%}
+instance_id('{{ domain }}',
+            '{{ class.name }}',
+            '{{ at_id }}',
+{% for attribute in id(class).inclusion[at_id] %}
+             {{ a_num() }}{{ code_name(attribute)}}{{ ")" if loop.last else ",\n"}}
+{%- endfor %}
+{%- endmacro %}
+{% macro id2num(at_id)%}
+{{{'I': '1', 'I2' : '2', 'I3' : '3'}[at_id]}}
+{%- endmacro %}
+{% macro id_exists()%}
+{% for at_id in id(class).defined %}
+{{ code_name(class.name) }}.id{{ id2num(at_id) }}_exists(constraint){{ "\n& " if not loop.last}}
+{%- endfor %}
+{%- endmacro %}
+# Add all Attributes as variables:
+pyDatalog.create_terms({{ var_attr_as_text()|indent(23)}})
+
+class {{ code_name(class.name) }}:
+    # rules for {{class.name}}...
+
+    {% for at_id in id(class).defined %}
+    # rule for id: {{at_id}}
+    ({{ instance_id(at_id)|indent(5) }}
+         <=
+     {{ instance()|indent(5) }})
+
+    {% endfor %}
+
+    attr_table = {{'{'}}{{ attr_table()|indent(18) }}}
+
+    {% for rnum in referential(class).defined %}
+    {{ rnum }}_ref_table = [attr_ref_table()]
+
+    {% endfor %}
+    # Somehow datalog needs some exeriance before it works =( 
+    dummy = ({{ dummy_instance()|indent(13) }})
+    +dummy
+    -dummy
+
+    @classmethod    
+    def query(cls, input):
+        result = no_condition()
+        for key, value in input.items():
+            result &= (cls.attr_table[key] == value)
+        return result
+
+    @staticmethod
+    def new(constraint):
+    
+        if {{ code_name(class.name) }}.id_exists(constraint):
+            raise ManaException()
+
+        head = {{ instance()|indent(15) }}
+        (head <= constraint)
+
+        if not {{ code_name(class.name) }}.id_exists(constraint):
+            raise ManaException()
+
+        return (head & constraint)
+      
+    {% for at_id in id(class).defined %}
+    @staticmethod
+    def id{{ id2num(at_id) }}_exists(constraint):
+        head = {{ instance_id(at_id)|indent(15) }}
+        head_var = set(head._variables().keys())
+        constraint_var = set(constraint._variables().keys())
+        if not head_var.issubset(constraint_var):
+            raise ManaException()
+        number_of_answers = _len(head & constraint)
+        if number_of_answers > 1:
+            raise ManaException()
+        return (number_of_answers == 1)
+
+    {% endfor %}
+    @staticmethod
+    def id_exists(constraint):
+        return ({{ id_exists()|indent(14) }})
+
+{% endfor %}
+{% endfor %}
