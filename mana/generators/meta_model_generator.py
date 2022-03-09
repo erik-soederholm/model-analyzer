@@ -67,7 +67,8 @@ class MetaModelGenerator:
     
         relation_table = dict()
         class_table = dict()
-
+        referential_table = dict()
+        
         for subsys in self.subsystems:
             for rel in subsys.rels:
                 if rel['rnum'] in relation_table:
@@ -79,6 +80,7 @@ class MetaModelGenerator:
                     raise ManaException() # no duplicates!
                 a_class['cnum'] = len(class_table) + 1
                 class_table[a_class['name']] = a_class
+                referential_table[a_class['name']] = {'defined' : [], 'inclusion' : {}}
         
         pp = pprint.PrettyPrinter(indent=2)
         pp.pprint(class_table)
@@ -303,14 +305,12 @@ class MetaModelGenerator:
             else:
                 raise ManaException() # can not find attr source
             return out
-                        
-        referential_table = dict()        
+          
         def referential(input : dict()):
             class_name = input['name']
             return referential_table[class_name]
         
         for class_name, _class in class_table.items():
-            ref_entry = {'defined' : [], 'inclusion' : {'core' :[]}}
             if 'attributes' in _class:
                 defined_set = set()
                 inclusion_table = dict()
@@ -339,31 +339,23 @@ class MetaModelGenerator:
                                 if attr['name'] in general_rename_table[rnum]:
                                     raise ManaException() # Error redundent!
                                 general_rename_table[rnum][attr['name']] = ref_name
-                        
-                    if len(rnum_set) > 0:
-                        for rnum in rnum_set:
-                            if rnum not in defined_set:
-                                defined_set |= {rnum}
-                                inclusion_table[rnum] = []
-                                nav_table[rnum] = dict()
-                                ref_entry['inclusion'][rnum] = []
-                            inclusion_table[rnum].append(attr['name'])
-                            ref_entry['inclusion'][rnum].append(attr['name'])
-                            if rnum in nav_rnum_set:
-                                nav_entry = dict()
-                                for nav_item in attr['nav_rnum']:
-                                    if nav_item['rnum'] == rnum:
-                                        if nav_item['side'] in nav_entry:
-                                            raise ManaException() # Error duplicate navigation!
-                                        nav_entry[nav_item['side']] = nav_item
-                                nav_table[rnum][attr['name']] = nav_entry
-                    else:
-                        ref_entry['inclusion']['core'].append(attr['name'])
-                defined_list = list(defined_set)
-                defined_list.sort()
-                ref_entry['defined'] = defined_list
+                    
+                    for rnum in rnum_set:
+                        if rnum not in defined_set:
+                            defined_set |= {rnum}
+                            inclusion_table[rnum] = []
+                            nav_table[rnum] = dict()
+                        inclusion_table[rnum].append(attr['name'])
+                        if rnum in nav_rnum_set:
+                            nav_entry = dict()
+                            for nav_item in attr['nav_rnum']:
+                                if nav_item['rnum'] == rnum:
+                                    if nav_item['side'] in nav_entry:
+                                        raise ManaException() # Error duplicate navigation!
+                                    nav_entry[nav_item['side']] = nav_item
+                            nav_table[rnum][attr['name']] = nav_entry
                 
-                for rnum in defined_list:
+                for rnum in defined_set:
                     source_table = rel_other_end(rnum, class_name)
                     bound_attr = dict()
                     bound_rename_table = dict()
@@ -397,11 +389,54 @@ class MetaModelGenerator:
                         source_data.append([class_table[source_class_name], 
                                             side, bound_attr[side], 
                                             bound_rename_table[side]])
-                    Id = id_as_attr_ref(source_data, _class, free_attr, general_rename_table)
-                           
-                pp = pprint.PrettyPrinter(indent=2)
-                pp.pprint(ref_entry)
-                referential_table[class_name] = ref_entry
+                        
+                    ref_list = id_as_attr_ref(source_data, _class, free_attr, general_rename_table)
+                    
+                    has_variants = False
+                    if ref_list[0]['side'] == 'superclass':
+                        reference_type = 'superclass'
+                        relationship_type = 'generalization'
+                        has_variants = True
+                    elif len(ref_list) == 2:
+                        reference_type = 'associative'
+                        if ref_list[0]['class_name'] == ref_list[1]['class_name']:
+                            relationship_type = 'binary_reflexive'
+                            has_variants = True
+                        else:
+                            relationship_type = 'binary'
+                    else:
+                        reference_type = 'to_one'
+                        relationship_type = 'binary'
+                    
+                    for ref in ref_list:
+                        ref_table_entry = referential_table[ref['class_name']]
+                        if rnum not in ref_table_entry['defined']:
+                            ref_table_entry['defined'].append(rnum)
+                            ref_table_entry['defined'].sort()
+                            ref_table_entry['inclusion'][rnum] = {
+                                'reference_type' : reference_type,
+                                'relationship_type' : relationship_type,
+                                'has_variants' : has_variants}
+                            if has_variants:
+                                ref_table_entry['inclusion'][rnum]['variant_keys'] = []
+                                ref_table_entry['inclusion'][rnum]['variant'] = dict()
+                        
+                        data = dict()
+                        data['ref_map'] = ref['ref_source_to_attr_map']
+                        data['ref_attributes'] = list(ref['ref_source_to_attr_map'].keys())
+                        data['ref_attributes'].sort()
+                        data['formalizing_class'] = _class
+                        
+                        if has_variants:
+                            if relationship_type == 'generalization':
+                                key = class_name
+                            elif reference_type == 'associative' and relationship_type == 'binary_reflexive':
+                                key = relation_table[rnum][ref['side']]['phrase']
+                            ref_table_entry['inclusion'][rnum]['variant_keys'].append(key)
+                            ref_table_entry['inclusion'][rnum]['variant_keys'].sort()
+                            ref_table_entry['inclusion'][rnum]['variant'][key] = data
+                        else:
+                            ref_table_entry['inclusion'][rnum]['data'] = data
             
         
         #template_file_name = "templates/meta_model.py.jinja"
