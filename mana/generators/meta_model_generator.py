@@ -303,19 +303,20 @@ class MetaModelGenerator:
             else:
                 raise ManaException() # can not find attr source
             return out
-                                
-        saved_referential = dict()
+                        
+        referential_table = dict()        
         def referential(input : dict()):
             class_name = input['name']
-            if class_name in saved_referential:
-                return saved_referential[class_name]
-            output = {'defined' : [], 'inclusion' : {'core' :[]}}
-            if 'attributes' in input:
+            return referential_table[class_name]
+        
+        for class_name, _class in class_table.items():
+            ref_entry = {'defined' : [], 'inclusion' : {'core' :[]}}
+            if 'attributes' in _class:
                 defined_set = set()
                 inclusion_table = dict()
                 nav_table = dict()
                 general_rename_table = dict()
-                for attr in input['attributes']:
+                for attr in _class['attributes']:
                     # Add each attribute to the inclusion_table based on its relations
                     nav_rnum_set = set()
                     if 'nav_rnum' in attr:
@@ -345,9 +346,9 @@ class MetaModelGenerator:
                                 defined_set |= {rnum}
                                 inclusion_table[rnum] = []
                                 nav_table[rnum] = dict()
-                                output['inclusion'][rnum] = []
+                                ref_entry['inclusion'][rnum] = []
                             inclusion_table[rnum].append(attr['name'])
-                            output['inclusion'][rnum].append(attr['name'])
+                            ref_entry['inclusion'][rnum].append(attr['name'])
                             if rnum in nav_rnum_set:
                                 nav_entry = dict()
                                 for nav_item in attr['nav_rnum']:
@@ -357,10 +358,10 @@ class MetaModelGenerator:
                                         nav_entry[nav_item['side']] = nav_item
                                 nav_table[rnum][attr['name']] = nav_entry
                     else:
-                        output['inclusion']['core'].append(attr['name'])
+                        ref_entry['inclusion']['core'].append(attr['name'])
                 defined_list = list(defined_set)
                 defined_list.sort()
-                output['defined'] = defined_list
+                ref_entry['defined'] = defined_list
                 
                 for rnum in defined_list:
                     source_table = rel_other_end(rnum, class_name)
@@ -396,12 +397,11 @@ class MetaModelGenerator:
                         source_data.append([class_table[source_class_name], 
                                             side, bound_attr[side], 
                                             bound_rename_table[side]])
-                    Id = id_as_attr_ref(source_data, input, free_attr, general_rename_table)
+                    Id = id_as_attr_ref(source_data, _class, free_attr, general_rename_table)
                            
                 pp = pprint.PrettyPrinter(indent=2)
-                pp.pprint(output)
-                saved_referential[class_name] = output
-            return output
+                pp.pprint(ref_entry)
+                referential_table[class_name] = ref_entry
             
         
         #template_file_name = "templates/meta_model.py.jinja"
