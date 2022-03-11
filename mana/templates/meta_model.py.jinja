@@ -2,15 +2,33 @@ from pyDatalog import pyDatalog
 
 pyDatalog.create_terms('instance', 'instance_id', 'no_condition')
 
-+no_condition() #Adding no_condition as a valid 'True' awser..
+# Add all Attributes as variables:
 
 {% for subsystem in subsystems %}
 # Subsystem: {{subsystem.name.subsys_name}}
 
 {% for class in subsystem.classes %}
 # Class: {{code_name(class.name)}}
-{% macro a_num()%}
-A{{ class.cnum }}_
+{% macro a_num(_calss=class)%}
+A{{ _calss.cnum }}_
+{%- endmacro %}
+{% macro var_attr_as_text()%}
+{% for attribute in class.attributes %}
+'{{ a_num() }}{{ code_name(attribute.name) }}'{{ ",\n" if not loop.last }}
+{%- endfor %} 
+{%- endmacro %}
+pyDatalog.create_terms({{ var_attr_as_text()|indent(23)}})
+{% endfor %}
+{% endfor %}
+
++no_condition() #Adding no_condition as a valid 'True' awser..
+
+{% for subsystem in subsystems %}
+# Subsystem: {{subsystem.name.subsys_name}}
+
+{% for class in subsystem.classes %}
+{% macro a_num(_calss=class)%}
+A{{ _calss.cnum }}_
 {%- endmacro %}
 {% macro var_attr_as_text()%}
 {% for attribute in class.attributes %}
@@ -22,12 +40,28 @@ A{{ class.cnum }}_
 '{{ attribute.name }}' : {{ a_num() }}{{ code_name(attribute.name) }}{{ ",\n" if not loop.last }}
 {%- endfor %} 
 {%- endmacro %}
-{% macro constraint(rnum)%}
-{% for attribute in referential(class).inclusion[rnum] %}
-({{ a_num() }}{{ code_name(attribute) }} == l_{{ code_name(attribute) }}){{ "\n& " if not loop.last }}
-{%- else %}
-no_condition()
+{% macro ref_table_map(data)%}
+{% for source_attribute in data.ref_attributes %}
+{% set ref_attribute = data.ref_map[source_attribute] %}
+{% set formalizing_class = data.formalizing_class %}
+{% set source_attribute_var = a_num() + code_name(source_attribute) %}
+{% set ref_attribute_var = a_num(formalizing_class) + code_name(ref_attribute) %}
+('{{ source_attribute_var }}', {{ ref_attribute_var }}){{ ",\n" if not loop.last else "," if data.ref_attributes|length == 1 }}
 {%- endfor %}
+{%- endmacro %}
+{% macro ref_table(rnum)%}
+{% set table_data = referential(class).inclusion[rnum] %}
+{% set has_variants = table_data.has_variants %}
+{% if has_variants %}
+{% set key_list = table_data.variant_keys %}
+{% set variant = table_data.variant %}
+{{"{"}}{% for key in table_data.variant_keys %}
+{{ " " if not loop.first }}'{{ key }}' :
+ ({{ ref_table_map(table_data.variant[key])|indent(2) }}){{ ",\n" if not loop.last }}
+{%- endfor %}}
+{%- else %}
+({{ ref_table_map(referential(class).inclusion[rnum].data)|indent(1) }})
+{%- endif %}
 {%- endmacro %}
 {% macro instance()%}
 instance('{{ domain }}',
@@ -59,9 +93,6 @@ instance_id('{{ domain }}',
 {{ code_name(class.name) }}.id{{ id2num(at_id) }}_exists(constraint){{ "\n& " if not loop.last}}
 {%- endfor %}
 {%- endmacro %}
-# Add all Attributes as variables:
-pyDatalog.create_terms({{ var_attr_as_text()|indent(23)}})
-
 class {{ code_name(class.name) }}:
     # rules for {{class.name}}...
 
@@ -76,7 +107,7 @@ class {{ code_name(class.name) }}:
     attr_table = {{'{'}}{{ attr_table()|indent(18) }}}
 
     {% for rnum in referential(class).defined %}
-    {{ rnum }}_ref_table = [attr_ref_table()]
+    {{ rnum }}_ref_table = {{ ref_table(rnum)|indent(20) }}
 
     {% endfor %}
     # Somehow datalog needs some exeriance before it works =( 
@@ -91,6 +122,20 @@ class {{ code_name(class.name) }}:
             result &= (cls.attr_table[key] == value)
         return result
 
+    {% for rnum in referential(class).defined %}
+    @classmethod
+    {% set has_variants = referential(class).inclusion[rnum].has_variants %}
+    def {{ rnum }}(cls, {{ "key, " if has_variants}}constraint):
+        input = constraint._variables()
+        result = no_condition()
+        for attr_source, attr_ref in cls.{{ rnum }}_ref_table{{ "[key]" if has_variants}}:
+            value = input[attr_source]
+            if len(value) != 1:
+                raise ManaException()
+            result &= (attr_ref == value.data[0])
+        return result
+
+    {% endfor %}
     @staticmethod
     def new(constraint):
     
