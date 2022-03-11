@@ -332,20 +332,15 @@ class MetaModelGenerator:
                             # for now remove all 'union_rnum' attr
                             rnum_set = rnum_set - set(attr['union_rnum'])
                             
-                    if 'ref_name' in attr:
-                        general_rename_table = {rnum : dict() for rnum in rnum_set}
-                        for rnum, ref_name in attr['ref_name']:
-                            if rnum in general_rename_table:
-                                if attr['name'] in general_rename_table[rnum]:
-                                    raise ManaException() # Error redundent!
-                                general_rename_table[rnum][attr['name']] = ref_name
                     
                     for rnum in rnum_set:
                         if rnum not in defined_set:
                             defined_set |= {rnum}
                             inclusion_table[rnum] = []
                             nav_table[rnum] = dict()
+                            general_rename_table[rnum] = dict()
                         inclusion_table[rnum].append(attr['name'])
+                        
                         if rnum in nav_rnum_set:
                             nav_entry = dict()
                             for nav_item in attr['nav_rnum']:
@@ -354,6 +349,13 @@ class MetaModelGenerator:
                                         raise ManaException() # Error duplicate navigation!
                                     nav_entry[nav_item['side']] = nav_item
                             nav_table[rnum][attr['name']] = nav_entry
+                    
+                    if 'ref_name' in attr:
+                        for rnum, ref_name in attr['ref_name']:
+                            if rnum in general_rename_table:
+                                if attr['name'] in general_rename_table[rnum]:
+                                    raise ManaException() # Error redundent!
+                                general_rename_table[rnum][attr['name']] = ref_name
                 
                 for rnum in defined_set:
                     source_table = rel_other_end(rnum, class_name)
@@ -390,7 +392,7 @@ class MetaModelGenerator:
                                             side, bound_attr[side], 
                                             bound_rename_table[side]])
                         
-                    ref_list = id_as_attr_ref(source_data, _class, free_attr, general_rename_table)
+                    ref_list = id_as_attr_ref(source_data, _class, free_attr, general_rename_table[rnum])
                     
                     has_variants = False
                     if ref_list[0]['side'] == 'superclass':
