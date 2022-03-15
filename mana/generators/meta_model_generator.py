@@ -325,14 +325,16 @@ class MetaModelGenerator:
                             # for now remove all 'union_rnum' attr
                             nav_rnum_set = all_nav_rnum_set - set(attr['union_rnum'])
                             
-                    rnum_set = nav_rnum_set
+                    rnum_set = set(nav_rnum_set)
                     if 'rnum' in attr:
-                        rnum_set = (nav_rnum_set | set(attr['rnum']))
+                        for rnum in attr['rnum']:
+                            # for now remove all 'ORxxx'
+                            if rnum[0] != 'O':
+                                rnum_set.add(rnum)
                         if 'union_rnum' in attr:
                             # for now remove all 'union_rnum' attr
                             rnum_set = rnum_set - set(attr['union_rnum'])
                             
-                    
                     for rnum in rnum_set:
                         if rnum not in defined_set:
                             defined_set |= {rnum}
