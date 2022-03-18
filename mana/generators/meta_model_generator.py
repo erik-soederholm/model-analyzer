@@ -21,6 +21,31 @@ class ManaParserException(ManaException):
         text = f'Parse error in {self._type}: "{self.file_path}"\n{str(self.e)[:-1]}'
         return super().output_str(text)
     
+class ManaRefAtttrNotFoundException(ManaException):
+    def __init__(self, rnum : str, _class : str, attributes : list):
+        self.rnum = rnum
+        self._class = _class
+        self.attributes = attributes
+        
+    def __str__(self):
+        part1 = f'Can not find referred attributes for Relationship: "{self.rnum}"'
+        part2 = f',\nAt class: "{self._class}"'
+        part3 = f',\nRepresented by formalized attributes: '
+        part4 = '"' + '", "'.join(self.attributes) + '"'
+        text = part1 + part2 + part3 + part4
+        return super().output_str(text)
+    
+class ManaUnknownClassInRelationshipException(ManaException):
+    def __init__(self, rnum : str, _class : str):
+        self.rnum = rnum
+        self._class = _class
+        
+    def __str__(self):
+        part1 = f'Unknown Class Name: "{self._class}"'
+        part2 = f' in specification for Relationship: "{self.rnum}"'
+        text = part1 + part2
+        return super().output_str(text)
+    
 class MetaModelGenerator:
     def __init__(self, xuml_meta_model_path: Path):
         self.xuml_meta_model_path = [('subsys', xuml_meta_model_path)]
@@ -87,15 +112,19 @@ class MetaModelGenerator:
         
         ref_attr_candidate_table = dict()
         
+        class_name_set = {name.lower() for name in class_table.keys()}
         for rnum, rel in relation_table.items():
             def add(_class, rel, towards_class, side, phrase = None):
                 if _class not in ref_attr_candidate_table:
                     ref_attr_candidate_table[_class] = set()
                 entry = ref_attr_candidate_table[_class]
                 entry.add((rel, towards_class, phrase, side))
-                
+            class_name_list = []
             if 't_side' in rel:
+                if 'assoc_cname' in rel:
+                    class_name_list.append(rel['assoc_cname'])
                 for side in ['p_side', 't_side']:
+                    class_name_list.append(rel[side]['cname'])
                     if 'assoc_cname' in rel:
                         add(rel['assoc_cname'], rnum, rel[side]['cname'], side, rel[side]['phrase'])
                     else:
@@ -103,9 +132,13 @@ class MetaModelGenerator:
                         add(rel[other[side]]['cname'], rnum, rel[side]['cname'], rel[side]['phrase'], side)
             elif 'superclass' in rel:
                 superclass = rel['superclass']
+                class_name_list.append(rel['superclass'])
                 for subclass in rel['subclasses']:
+                    class_name_list.append(subclass)
                     add(subclass, rnum, superclass, 'superclass')
-        
+            for class_name in class_name_list:
+                if class_name.lower() not in class_name_set:
+                    raise ManaUnknownClassInRelationshipException(rnum, class_name)
         
         def relation_navigation_fix(class_name, nav_data):
             selected_candidate_list = list()
@@ -162,7 +195,14 @@ class MetaModelGenerator:
             else:
                 raise ManaException() # Bad data!
 
-        def id_as_attr_ref(source_classes, ref_class, input_free_attr_refs, free_rename_attr):
+        def id_as_attr_ref(source_classes, ref_class, input_free_attr_refs, free_rename_attr, rnum):
+            def ref_attributes():
+                out = []
+                for attr in ref_class['attributes']:
+                    if 'rnum' in attr:
+                        if rnum in attr['rnum']:
+                            out.append(attr['name'])
+                return out
             free_attr_refs = set()
             free_camal_table = dict()
             free_ref_has_id_attr = False
@@ -294,7 +334,7 @@ class MetaModelGenerator:
                 best_score = min(score_table.keys())
                 best_score_list = score_table[best_score]
                 if len(best_score_list) > 1:
-                    raise ManaException() # multipple attr sources
+                    raise ManaRefAtttrNotFoundException(rnum, ref_class['name'], ref_attributes()) # multipple attr sources
                 class_data_dict = best_score_list[0]
                 out = [{
                     'class_name' : side_to_class_table[side],
@@ -303,7 +343,7 @@ class MetaModelGenerator:
                     'ref_source_to_attr_map' : trans_table }
                        for side, (_id, trans_table, unknown_table) in class_data_dict.items()]
             else:
-                raise ManaException() # can not find attr source
+                raise ManaRefAtttrNotFoundException(rnum, ref_class['name'], ref_attributes()) # can not find attr source
             return out
           
         def referential(input : dict()):
@@ -394,7 +434,7 @@ class MetaModelGenerator:
                                             side, bound_attr[side], 
                                             bound_rename_table[side]])
                         
-                    ref_list = id_as_attr_ref(source_data, _class, free_attr, general_rename_table[rnum])
+                    ref_list = id_as_attr_ref(source_data, _class, free_attr, general_rename_table[rnum], rnum)
                     
                     has_variants = False
                     if ref_list[0]['side'] == 'superclass':
