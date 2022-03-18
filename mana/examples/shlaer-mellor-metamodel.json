@@ -1,0 +1,5 @@
+{
+    "subsystems": [
+        "../../../shlaer-mellor-metamodel/class-metamodel/domain-subsystem/domain.xmm"
+    ]
+}

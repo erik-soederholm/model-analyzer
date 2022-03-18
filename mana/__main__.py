@@ -1,16 +1,31 @@
 
 import sys
+import json
 from pathlib import Path
 
-from mana.generators.meta_model_generator import MetaModelGenerator
-
+from mana.generators.meta_model_generator import MetaModelGenerator, ManaException
 
 def main():
-
-    test_model = Path(__file__).parent / "examples/road_subsystem_class_model.xmm"
-    mmg = MetaModelGenerator(test_model)
-    mmg.parse()
-    mmg.generate()
+    examples_path = Path(__file__).parent / "examples"
+    manifest_path = examples_path / "shlaer-mellor-metamodel.json"
+    with open(manifest_path) as manifest_file:
+        manifest = json.load(manifest_file)
+        
+    job = {'subsystems': []}
+    if 'subsystems' in manifest:
+        for subsystem in manifest['subsystems']:
+            job['subsystems'].append(examples_path / subsystem)
+    mmg = MetaModelGenerator(job)
+    
+    
+    try:
+        mmg.parse()
+        mmg.generate()
+    except ManaException as e:
+        if e.exit():
+            sys.exit(e)
+        else:
+            raise e
 
 if __name__ == "__main__":
     main()

@@ -6,10 +6,14 @@ from flatland.flatland_exceptions import ModelParseError
 from jinja2 import Environment, FileSystemLoader
 
 class ManaException(Exception):
+    def __init__(self, exit = False):
+        self._exit = exit
     def output_str(self, input : str):
         rows = input.split('\n')
         return 'Model-Analysis: [' \
            + '\n                 '.join(rows) + ']'
+    def exit(self) -> bool:
+        return self._exit if hasattr(self, '_exit') else True
 
 class ManaParserException(ManaException):
     def __init__(self, file_path, _type, e):
@@ -47,20 +51,18 @@ class ManaUnknownClassInRelationshipException(ManaException):
         return super().output_str(text)
     
 class MetaModelGenerator:
-    def __init__(self, xuml_meta_model_path: Path):
-        self.xuml_meta_model_path = [('subsys', xuml_meta_model_path)]
+    def __init__(self, jobs: dict):
         self.subsystems = []
+        self.jobs = jobs
         
     def parse(self): 
-        for file_type, parse_file in self.xuml_meta_model_path:
-            if file_type == 'subsys':
-                parse_job= ModelParser(model_file_path=parse_file, debug=False)
-                try:
-                    self.subsystems.append(parse_job.parse())
-                except ModelParseError as flatland_e:
-                    sys.exit(ManaParserException(flatland_e.model_file, "class model", flatland_e.e))
-            else:
-                pass # Todo
+        for parse_file in self.jobs['subsystems']:
+            parse_job= ModelParser(model_file_path=parse_file, debug=False)
+            try:
+                self.subsystems.append(parse_job.parse())
+            except ModelParseError as flatland_e:
+                 raise ManaParserException(flatland_e.model_file, "class model", flatland_e.e)
+
         # Print parsed data to file
         with open("parse_data.txt", "w") as data_file:
             pp = pprint.PrettyPrinter(indent=2, stream=data_file)
@@ -107,8 +109,8 @@ class MetaModelGenerator:
                 class_table[a_class['name']] = a_class
                 referential_table[a_class['name']] = {'defined' : [], 'inclusion' : {}}
         
-        pp = pprint.PrettyPrinter(indent=2)
-        pp.pprint(class_table)
+        #pp = pprint.PrettyPrinter(indent=2)
+        #pp.pprint(class_table)
         
         ref_attr_candidate_table = dict()
         
@@ -363,7 +365,7 @@ class MetaModelGenerator:
                         nav_rnum_set = {nav_item['rnum'] for nav_item in attr['nav_rnum']}
                         if 'union_rnum' in attr:
                             # for now remove all 'union_rnum' attr
-                            nav_rnum_set = all_nav_rnum_set - set(attr['union_rnum'])
+                            nav_rnum_set = nav_rnum_set - set(attr['union_rnum'])
                             
                     rnum_set = set(nav_rnum_set)
                     if 'rnum' in attr:
