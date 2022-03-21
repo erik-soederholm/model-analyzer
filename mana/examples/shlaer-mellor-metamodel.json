@@ -1,5 +1,6 @@
 {
     "subsystems": [
-        "../../../shlaer-mellor-metamodel/class-metamodel/domain-subsystem/domain.xmm"
+        "../../../shlaer-mellor-metamodel/class-metamodel/domain-subsystem/domain.xmm",
+        "../../../shlaer-mellor-metamodel/class-metamodel/class-and-attribute-subsystem/class-attribute.xmm"
     ]
 }
