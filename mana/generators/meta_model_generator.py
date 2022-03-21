@@ -5,13 +5,28 @@ from flatland.input.model_parser import ModelParser
 from flatland.flatland_exceptions import ModelParseError
 from jinja2 import Environment, FileSystemLoader
 
+
+def output_str(input : str):
+    rows = input.split('\n')
+    return 'Model-Analysis: [' \
+       + '\n                 '.join(rows) + ']'
+       
+       
+       
+class ManaClassImportFromMissingSubsystemWarning():
+    def __init__(self, _class : str, subsys : str):
+        self._class = _class
+        self.subsys = subsys
+    
+    def __str__(self):
+        part1 = f'Warning, Class: "{self._class}"'
+        part2 = f' is imported from none existent Subsystem "{self.subsys}"'
+        text = part1 + part2
+        return output_str(text)
+
 class ManaException(Exception):
     def __init__(self, exit = False):
         self._exit = exit
-    def output_str(self, input : str):
-        rows = input.split('\n')
-        return 'Model-Analysis: [' \
-           + '\n                 '.join(rows) + ']'
     def exit(self) -> bool:
         return self._exit if hasattr(self, '_exit') else True
 
@@ -23,9 +38,9 @@ class ManaParserException(ManaException):
 
     def __str__(self):
         text = f'Parse error in {self._type}: "{self.file_path}"\n{str(self.e)[:-1]}'
-        return super().output_str(text)
+        return output_str(text)
     
-class ManaRefAtttrNotFoundException(ManaException):
+class ManaRefAttrNotFoundException(ManaException):
     def __init__(self, rnum : str, _class : str, attributes : list):
         self.rnum = rnum
         self._class = _class
@@ -37,7 +52,7 @@ class ManaRefAtttrNotFoundException(ManaException):
         part3 = f',\nRepresented by formalized attributes: '
         part4 = '"' + '", "'.join(self.attributes) + '"'
         text = part1 + part2 + part3 + part4
-        return super().output_str(text)
+        return output_str(text)
     
 class ManaUnknownClassInRelationshipException(ManaException):
     def __init__(self, rnum : str, _class : str):
@@ -48,7 +63,7 @@ class ManaUnknownClassInRelationshipException(ManaException):
         part1 = f'Unknown Class Name: "{self._class}"'
         part2 = f' in specification for Relationship: "{self.rnum}"'
         text = part1 + part2
-        return super().output_str(text)
+        return output_str(text)
     
 class MetaModelGenerator:
     def __init__(self, jobs: dict):
@@ -92,9 +107,13 @@ class MetaModelGenerator:
                 output['defined'] = ['I'] # the implication of adding an 'I' without any attributes is that it will be an singleton
             return output
     
+        subsystem_table = dict()
         relation_table = dict()
         class_table = dict()
         referential_table = dict()
+        
+        for subsys in self.subsystems:
+            subsystem_table[subsys.name['subsys_name']] = subsys
         
         for subsys in self.subsystems:
             for rel in subsys.rels:
@@ -103,6 +122,11 @@ class MetaModelGenerator:
                 relation_table[rel['rnum']] = rel
                 
             for a_class in subsys.classes:
+                if 'import' in a_class:
+                    if a_class['import'] in subsystem_table:
+                        continue
+                    else:
+                        print(ManaClassImportFromMissingSubsystemWarning(a_class['name'], a_class['import']))
                 if a_class['name'] in class_table:
                     raise ManaException() # no duplicates!
                 a_class['cnum'] = len(class_table) + 1
@@ -288,7 +312,7 @@ class MetaModelGenerator:
                     if len(unknown_attr) == 0 and len(my_bound_attr_refs) == 0 and rename_is_ok:
                         class_attr_candidates[_id] = (attr_candidates, trans_table, unknown_table)
                 if len(class_attr_candidates) == 0:
-                    raise ManaException() # no solution found 
+                    raise ManaRefAttrNotFoundException(rnum, ref_class['name'], ref_attributes()) # no solution found 
                 all_attr_candidates[side] = class_attr_candidates
             
             first = True
@@ -336,7 +360,7 @@ class MetaModelGenerator:
                 best_score = min(score_table.keys())
                 best_score_list = score_table[best_score]
                 if len(best_score_list) > 1:
-                    raise ManaRefAtttrNotFoundException(rnum, ref_class['name'], ref_attributes()) # multipple attr sources
+                    raise ManaRefAttrNotFoundException(rnum, ref_class['name'], ref_attributes()) # multipple attr sources
                 class_data_dict = best_score_list[0]
                 out = [{
                     'class_name' : side_to_class_table[side],
@@ -345,7 +369,7 @@ class MetaModelGenerator:
                     'ref_source_to_attr_map' : trans_table }
                        for side, (_id, trans_table, unknown_table) in class_data_dict.items()]
             else:
-                raise ManaRefAtttrNotFoundException(rnum, ref_class['name'], ref_attributes()) # can not find attr source
+                raise ManaRefAttrNotFoundException(rnum, ref_class['name'], ref_attributes()) # can not find attr source
             return out
           
         def referential(input : dict()):
