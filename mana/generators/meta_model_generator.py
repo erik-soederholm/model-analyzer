@@ -41,28 +41,100 @@ class ManaParserException(ManaException):
         return output_str(text)
     
 class ManaRefAttrNotFoundException(ManaException):
-    def __init__(self, rnum : str, _class : str, attributes : list):
+    def __init__(self, rnum : str, _class : str, subsys : str, attributes : list):
         self.rnum = rnum
         self._class = _class
+        self.subsys = subsys
         self.attributes = attributes
         
     def __str__(self):
         part1 = f'Can not find referred attributes for Relationship: "{self.rnum}"'
-        part2 = f',\nAt class: "{self._class}"'
-        part3 = f',\nRepresented by formalized attributes: '
-        part4 = '"' + '", "'.join(self.attributes) + '"'
+        part2 = f',\nat class: "{self._class}"'
+        part3 = f' declared in Subsystem: "{self.declared_subsys}"'
+        part4 = f',\nrepresented by formalized attributes: '
+        part5 = '"' + '", "'.join(self.attributes) + '"'
+        text = part1 + part2 + part3 + part4 + part5
+        return output_str(text)
+    
+class ManaMultipleClassDeclarationException(ManaException):
+    def __init__(self, _class : str, subsys1 : str, subsys2 : str):
+        self._class = _class
+        self.subsys1 = subsys1
+        self.subsys2 = subsys2
+        
+    def __str__(self):
+        part1 = f'Class: "{self._class}"'
+        part2 = f' is defined multiple times both in Subsystem: "{self.subsys1}"'
+        part3 = f' and in Subsystem: "{self.subsys2}"'
+        text = part1 + part2 + part3
+        return output_str(text)
+    
+class ManaClassImportedFromWrongSubsystemException(ManaException):
+    def __init__(self, _class : str, from_subsys : str, into_subsys : str, declared_subsys : str):
+        self._class = _class
+        self.from_subsys = from_subsys
+        self.into_subsys = into_subsys
+        self.declared_subsys = declared_subsys
+        
+    def __str__(self):
+        part1 = f'Class: "{self._class}"'
+        part2 = f' imported form Subsystem: "{self.from_subsys}"'
+        part3 = f'\ninto Subsystem: "{self.into_subsys}"'
+        part4 = f' but was declared in Subsystem: "{self.declared_subsys}"'
         text = part1 + part2 + part3 + part4
         return output_str(text)
     
+
+class ManaClassMissingInSubsystemException(ManaException):
+    def __init__(self, _class : str, subsys : str):
+        self._class = _class
+        self.subsys = subsys
+        
+    def __str__(self):
+        part1 = f'Class: "{self._class}"'
+        part2 = f' is missing in Subsystem: "{self.from_subsys}"'
+        text = part1 + part2
+        return output_str(text)
+    
+    
+    
 class ManaUnknownClassInRelationshipException(ManaException):
-    def __init__(self, rnum : str, _class : str):
+    def __init__(self, rnum : str, _class : str, subsys : str):
         self.rnum = rnum
         self._class = _class
+        self.subsys = subsys
         
     def __str__(self):
         part1 = f'Unknown Class Name: "{self._class}"'
         part2 = f' in specification for Relationship: "{self.rnum}"'
-        text = part1 + part2
+        part3 = f'\nwhich is declared in Subsystem: "{self.subsys}"'
+        text = part1 + part2 + part3
+        return output_str(text)
+    
+class ManaUnknownReferentialAttributeException(ManaException):
+    def __init__(self, rnum : str, _class : str, subsys : str):
+        self.rnum = rnum
+        self._class = _class
+        self.subsys = subsys
+        
+    def __str__(self):
+        part1 = f'Class: "{self._class}"'
+        part2 = f' in Subsystem: "{self.subsys}"'
+        part3 = f'\nhas a referential attribute over an unknown Relationship: "{self.rnum}"'
+        text = part1 + part2 + part3
+        return output_str(text)
+    
+class ManaInvalidReferentialAttributeException(ManaException):
+    def __init__(self, rnum : str, _class : str, subsys : str):
+        self.rnum = rnum
+        self._class = _class
+        self.subsys = subsys
+        
+    def __str__(self):
+        part1 = f'Relationship: "{self.rnum}"'
+        part2 = f' has an invalid referential attribute at Class: "{self._class}"'
+        part3 = f' in Subsystem: "{self.subsys}"'
+        text = part1 + part2 + part3
         return output_str(text)
     
 class MetaModelGenerator:
@@ -109,29 +181,64 @@ class MetaModelGenerator:
     
         subsystem_table = dict()
         relation_table = dict()
+        relation_to_subsys = dict()
         class_table = dict()
+        class_to_subsys = dict()
         referential_table = dict()
         
         for subsys in self.subsystems:
-            subsystem_table[subsys.name['subsys_name']] = subsys
+            subsys_name = subsys.name['subsys_name']
+            subsystem_table[subsys_name] = subsys
+            for a_class in subsys.classes:                
+                class_name = a_class['name']
+                if 'import' not in a_class:            
+                    if class_name in class_to_subsys:
+                        raise ManaMultipleClassDeclarationException(
+                            class_name, 
+                            class_to_subsys[class_name], 
+                            subsys_name) # no duplicate classes!
+                    class_to_subsys[class_name] = subsys_name
         
         for subsys in self.subsystems:
+            subsys_name = subsys.name['subsys_name']
             for rel in subsys.rels:
-                if rel['rnum'] in relation_table:
+                rel_name = rel['rnum']
+                if rel_name in relation_table:
                     raise ManaException() # no duplicates!
-                relation_table[rel['rnum']] = rel
+                relation_table[rel_name] = rel
+                relation_to_subsys[rel_name] = subsys_name
                 
             for a_class in subsys.classes:
+                class_name = a_class['name']
                 if 'import' in a_class:
-                    if a_class['import'] in subsystem_table:
-                        continue
-                    else:
-                        print(ManaClassImportFromMissingSubsystemWarning(a_class['name'], a_class['import']))
-                if a_class['name'] in class_table:
-                    raise ManaException() # no duplicates!
+                    import_subsys_name = a_class['import']
+                    if class_name in class_to_subsys:
+                        if import_subsys_name.lower() == (class_to_subsys[class_name]).lower():
+                            continue # all is ok!
+                        else:
+                            raise ManaClassImportedFromWrongSubsystemException(
+                                class_name,
+                                import_subsys_name, # from 
+                                subsys_name, # into
+                                class_to_subsys[class_name]) # but declared in
+                    else:    
+                        if import_subsys_name in subsystem_table:
+                            raise ManaClassMissingInSubsystemException(class_name, import_subsys_name) # class is missing!
+                        else:
+                            print(ManaClassImportFromMissingSubsystemWarning(class_name, import_subsys_name))
+                if class_name in class_table:
+                    # this could only happen if more then one 
+                    # ManaClassImportFromMissingSubsystemWarning is 
+                    # issued (this is ok!)
+                    continue 
+                
+                if class_name not in class_to_subsys:
+                    # class_to_subsys is used for error messages...
+                    class_to_subsys[class_name] = subsys_name
+                
                 a_class['cnum'] = len(class_table) + 1
-                class_table[a_class['name']] = a_class
-                referential_table[a_class['name']] = {'defined' : [], 'inclusion' : {}}
+                class_table[class_name] = a_class
+                referential_table[class_name] = {'defined' : [], 'inclusion' : {}}
         
         #pp = pprint.PrettyPrinter(indent=2)
         #pp.pprint(class_table)
@@ -164,7 +271,7 @@ class MetaModelGenerator:
                     add(subclass, rnum, superclass, 'superclass')
             for class_name in class_name_list:
                 if class_name.lower() not in class_name_set:
-                    raise ManaUnknownClassInRelationshipException(rnum, class_name)
+                    raise ManaUnknownClassInRelationshipException(rnum, class_name, relation_to_subsys[rnum])
         
         def relation_navigation_fix(class_name, nav_data):
             selected_candidate_list = list()
@@ -201,6 +308,8 @@ class MetaModelGenerator:
                                         for nav_item in attr['nav_rnum']]
 
         def rel_other_end(rnum, my_end):
+            if rnum not in relation_table:
+                raise ManaUnknownReferentialAttributeException(rnum, my_end, class_to_subsys[my_end])
             rel = relation_table[rnum]
             table = None
             if 'assoc_cname' in rel:
@@ -216,7 +325,7 @@ class MetaModelGenerator:
                     table[subclass] = {'superclass' : rel['superclass']}
             if table is not None:
                 if my_end not in table:
-                    raise ManaException() # Bad data!
+                    raise ManaInvalidReferentialAttributeException(rnum, my_end, class_to_subsys[my_end])
                 return table[my_end]
             else:
                 raise ManaException() # Bad data!
@@ -312,7 +421,7 @@ class MetaModelGenerator:
                     if len(unknown_attr) == 0 and len(my_bound_attr_refs) == 0 and rename_is_ok:
                         class_attr_candidates[_id] = (attr_candidates, trans_table, unknown_table)
                 if len(class_attr_candidates) == 0:
-                    raise ManaRefAttrNotFoundException(rnum, ref_class['name'], ref_attributes()) # no solution found 
+                    raise ManaRefAttrNotFoundException(rnum, ref_class['name'], class_to_subsys[ref_class['name']], ref_attributes()) # no solution found 
                 all_attr_candidates[side] = class_attr_candidates
             
             first = True
@@ -360,7 +469,7 @@ class MetaModelGenerator:
                 best_score = min(score_table.keys())
                 best_score_list = score_table[best_score]
                 if len(best_score_list) > 1:
-                    raise ManaRefAttrNotFoundException(rnum, ref_class['name'], ref_attributes()) # multipple attr sources
+                    raise ManaRefAttrNotFoundException(rnum, ref_class['name'], class_to_subsys[ref_class['name']], ref_attributes()) # multipple attr sources
                 class_data_dict = best_score_list[0]
                 out = [{
                     'class_name' : side_to_class_table[side],
@@ -369,7 +478,7 @@ class MetaModelGenerator:
                     'ref_source_to_attr_map' : trans_table }
                        for side, (_id, trans_table, unknown_table) in class_data_dict.items()]
             else:
-                raise ManaRefAttrNotFoundException(rnum, ref_class['name'], ref_attributes()) # can not find attr source
+                raise ManaRefAttrNotFoundException(rnum, ref_class['name'], class_to_subsys[ref_class['name']], ref_attributes()) # can not find attr source
             return out
           
         def referential(input : dict()):
