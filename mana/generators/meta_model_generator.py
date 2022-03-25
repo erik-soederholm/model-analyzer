@@ -24,36 +24,45 @@ class MetaModelGenerator:
             pp = pprint.PrettyPrinter(indent=2, stream=data_file)
             pp.pprint(dict(self.subsystems[0]._asdict()))
     
-    def generate(self):
+    def code_name(self, name : str):
+        """ pure function """
+        return '_'.join(name.split())
         
-        def code_name(name : str):
-            return '_'.join(name.split())
+    def symb_name(self, name : str):
+        """ pure function """
+        return code_name(name).lower()
+    
+    def id (self, input : dict()):
+        """ pure function """
+        output = {'defined' : [], 'inclusion' : {'I' :[],'I2' :[],'I3' :[]}}
+        if 'attributes' in input:
+            defined_set = set()
+            for attr in input['attributes']:
+                if 'id' in attr:
+                    for id in attr['id']:
+                        defined_set |= {id}
+                        output['inclusion'][id].append(attr['name'])
+            defined_list = list(defined_set)
+            defined_list.sort()
+            output['defined'] = defined_list
+        if output['defined'] == []:
+            output['defined'] = ['I'] # the implication of adding an 'I' without any attributes is that it will be an singleton
+        return output
+    
+            
+    def referential(self, input : dict()):
+        """ function using self.referential_table """
+        class_name = input['name']
+        return self.referential_table[class_name]
         
-        def symb_name(name : str):
-            return code_name(name).lower()
-        
-        def id (input : dict()):
-            output = {'defined' : [], 'inclusion' : {'I' :[],'I2' :[],'I3' :[]}}
-            if 'attributes' in input:
-                defined_set = set()
-                for attr in input['attributes']:
-                    if 'id' in attr:
-                        for id in attr['id']:
-                            defined_set |= {id}
-                            output['inclusion'][id].append(attr['name'])
-                defined_list = list(defined_set)
-                defined_list.sort()
-                output['defined'] = defined_list
-            if output['defined'] == []:
-                output['defined'] = ['I'] # the implication of adding an 'I' without any attributes is that it will be an singleton
-            return output
+    def interpret(self):
     
         subsystem_table = dict()
         relation_table = dict()
         relation_to_subsys = dict()
         class_table = dict()
         class_to_subsys = dict()
-        referential_table = dict()
+        self.referential_table = dict()
         
         for subsys in self.subsystems:
             subsys_name = subsys.name['subsys_name']
@@ -107,7 +116,7 @@ class MetaModelGenerator:
                 
                 a_class['cnum'] = len(class_table) + 1
                 class_table[class_name] = a_class
-                referential_table[class_name] = {'defined' : [], 'inclusion' : {}}
+                self.referential_table[class_name] = {'defined' : [], 'inclusion' : {}}
         
         #pp = pprint.PrettyPrinter(indent=2)
         #pp.pprint(class_table)
@@ -265,7 +274,7 @@ class MetaModelGenerator:
                     if class_name.lower() not in map((lambda d : d['name'].lower()), _class['attributes']):
                         convert_id = True
                 
-                id_def = id(_class)
+                id_def = self.id(_class)
                 class_attr_candidates = dict()
                 for _id in id_def['defined']:
                     attr_candidates = set()
@@ -367,11 +376,7 @@ class MetaModelGenerator:
                 raise ManaRefAttrNotFoundException(rnum, ref_class['name'], class_to_subsys[ref_class['name']], ref_attributes()) # can not find attr source
             return out
 
-        
-        def referential(input : dict()):
-            class_name = input['name']
-            return referential_table[class_name]
-        
+
         for class_name, _class in class_table.items():
             if 'attributes' in _class:
                 defined_set = set()
@@ -480,7 +485,7 @@ class MetaModelGenerator:
                         relationship_type = 'binary'
                     
                     for ref in ref_list:
-                        ref_table_entry = referential_table[ref['class_name']]
+                        ref_table_entry = self.referential_table[ref['class_name']]
                         if rnum not in ref_table_entry['defined']:
                             ref_table_entry['defined'].append(rnum)
                             ref_table_entry['defined'].sort()
@@ -508,16 +513,18 @@ class MetaModelGenerator:
                             ref_table_entry['inclusion'][rnum]['variant'][key] = data
                         else:
                             ref_table_entry['inclusion'][rnum]['data'] = data
-            
+        
+        
+    def generate(self):
         
         #template_file_name = "templates/meta_model.py.jinja"
         #template_file = Path(__file__).parent.parent / template_file_name
         file_loader = FileSystemLoader( Path(__file__).parent.parent / 'templates')
         env = Environment(loader=file_loader, trim_blocks=True, lstrip_blocks= True, extensions=['jinja2.ext.do'])
-        env.globals['code_name'] = code_name
-        env.globals['symb_name'] = symb_name
-        env.globals['id'] = id 
-        env.globals['referential'] = referential
+        env.globals['code_name'] = lambda name : self.code_name(name)
+        env.globals['symb_name'] = lambda name : self.symb_name(name)
+        env.globals['id'] = lambda _class : self.id(_class)
+        env.globals['referential'] = lambda _class : self.referential(_class)
 
         template = env.get_template('meta_model.py.jinja')
         
