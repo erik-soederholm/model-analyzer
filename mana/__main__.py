@@ -20,6 +20,7 @@ def main():
     
     try:
         mmg.parse()
+        mmg.interpret()
         mmg.generate()
     except ManaException as e:
         if e.exit():
