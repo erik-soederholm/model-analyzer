@@ -3,7 +3,8 @@ import sys
 import json
 from pathlib import Path
 
-from mana.generators.meta_model_generator import MetaModelGenerator, ManaException
+from mana.generators.meta_model_generator import MetaModelGenerator
+from mana.warnings_and_exceptions import ManaException
 
 def main():
     examples_path = Path(__file__).parent / "examples"
