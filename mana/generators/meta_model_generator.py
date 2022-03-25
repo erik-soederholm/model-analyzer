@@ -10,9 +10,8 @@ def output_str(input : str):
     rows = input.split('\n')
     return 'Model-Analysis: [' \
        + '\n                 '.join(rows) + ']'
-       
-       
-       
+
+
 class ManaClassImportFromMissingSubsystemWarning():
     def __init__(self, _class : str, subsys : str):
         self._class = _class
@@ -50,7 +49,7 @@ class ManaRefAttrNotFoundException(ManaException):
     def __str__(self):
         part1 = f'Can not find referred attributes for Relationship: "{self.rnum}"'
         part2 = f',\nat class: "{self._class}"'
-        part3 = f' declared in Subsystem: "{self.declared_subsys}"'
+        part3 = f' declared in Subsystem: "{self.subsys}"'
         part4 = f',\nrepresented by formalized attributes: '
         part5 = '"' + '", "'.join(self.attributes) + '"'
         text = part1 + part2 + part3 + part4 + part5
@@ -329,7 +328,24 @@ class MetaModelGenerator:
                 return table[my_end]
             else:
                 raise ManaException() # Bad data!
-
+        
+        def remove_ignored_attributes(attr_map : dict, _class):
+            remove_list = []
+            if 'ignore attributes' in _class:
+                ignore_set = {attr['name'] for attr in _class['ignore attributes']}
+                remove_list = []
+                for source, ref in attr_map.items():
+                    if ref in ignore_set:
+                        remove_list.append(source)
+            if len(remove_list) == 0:
+                return attr_map
+            else:
+                out = dict(attr_map)
+                for key in remove_list:
+                    del out[key]
+                return out
+                
+                
         def id_as_attr_ref(source_classes, ref_class, input_free_attr_refs, free_rename_attr, rnum):
             def ref_attributes():
                 out = []
@@ -475,12 +491,13 @@ class MetaModelGenerator:
                     'class_name' : side_to_class_table[side],
                     'side' : side,
                     'id' : _id,
-                    'ref_source_to_attr_map' : trans_table }
+                    'ref_source_to_attr_map' : remove_ignored_attributes(trans_table, ref_class) }
                        for side, (_id, trans_table, unknown_table) in class_data_dict.items()]
             else:
                 raise ManaRefAttrNotFoundException(rnum, ref_class['name'], class_to_subsys[ref_class['name']], ref_attributes()) # can not find attr source
             return out
-          
+
+        
         def referential(input : dict()):
             class_name = input['name']
             return referential_table[class_name]
@@ -491,7 +508,12 @@ class MetaModelGenerator:
                 inclusion_table = dict()
                 nav_table = dict()
                 general_rename_table = dict()
-                for attr in _class['attributes']:
+                all_attributes = []
+                for attribute_type in ['attributes', 'ignore attributes']:
+                    if attribute_type in _class:
+                        all_attributes +=  _class[attribute_type]
+                
+                for attr in all_attributes:
                     # Add each attribute to the inclusion_table based on its relations
                     nav_rnum_set = set()
                     if 'nav_rnum' in attr:
