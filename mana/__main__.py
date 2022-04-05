@@ -13,16 +13,28 @@ def main():
         manifest = json.load(manifest_file)
         
     job = {'subsystems': []}
+    ex = {'subsystems': []}
     if 'subsystems' in manifest:
+        first = True
         for subsystem in manifest['subsystems']:
+            if first:
+                ex['subsystems'].append(examples_path / subsystem)
+                
             job['subsystems'].append(examples_path / subsystem)
-    mmg = MetaModelGenerator(job)
+            first = False
+    mmg = MetaModelGenerator(job)   
     
     
     try:
         mmg.parse()
         mmg.interpret()
         mmg.generate()
+        
+        from mana.generators.model_instantiator import ModelInstantiator
+        mi = ModelInstantiator(job)
+        mi.parse()
+        mi.interpret()
+        mi.instantiate()
     except ManaException as e:
         if e.exit():
             sys.exit(e)

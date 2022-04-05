@@ -1,4 +1,5 @@
-from pyDatalog import pyDatalog 
+from pyDatalog import pyDatalog
+from mana.warnings_and_exceptions import *
 
 pyDatalog.create_terms('instance', 'instance_id', 'no_condition')
 
@@ -35,9 +36,9 @@ A{{ _calss.cnum }}_
 '{{ a_num() }}{{ code_name(attribute.name) }}'{{ ",\n" if not loop.last }}
 {%- endfor %} 
 {%- endmacro %}
-{% macro attr_table()%}
+{% macro attr_table(spacer='')%}
 {% for attribute in class.attributes %}
-'{{ attribute.name }}' : {{ a_num() }}{{ code_name(attribute.name) }}{{ ",\n" if not loop.last }}
+'{{ attribute.name }}' : {{ spacer }}{{ a_num() }}{{ code_name(attribute.name) }}{{ spacer }}{{ ",\n" if not loop.last }}
 {%- endfor %} 
 {%- endmacro %}
 {% macro ref_table_map(data)%}
@@ -88,23 +89,30 @@ instance_id('{{ domain }}',
 {% macro id2num(at_id)%}
 {{{'I': '1', 'I2' : '2', 'I3' : '3'}[at_id]}}
 {%- endmacro %}
-{% macro id_exists()%}
+{% macro id_exists(operator)%}
 {% for at_id in id(class).defined %}
-{{ code_name(class.name) }}.id{{ id2num(at_id) }}_exists(constraint){{ "\n& " if not loop.last}}
+{{ code_name(class.name) }}.id{{ id2num(at_id) }}_exists(constraint){{ "\n" + operator + " " if not loop.last}}
 {%- endfor %}
 {%- endmacro %}
 class {{ code_name(class.name) }}:
     # rules for {{class.name}}...
 
+    instance_predicate = (
+        lambda : {{ instance()|indent(17) }})
+
+
     {% for at_id in id(class).defined %}
     # rule for id: {{at_id}}
-    ({{ instance_id(at_id)|indent(5) }}
-         <=
-     {{ instance()|indent(5) }})
+    id{{ id2num(at_id) }}_predicate = (
+        lambda : {{ instance_id(at_id)|indent(20) }})
+
+    (id{{ id2num(at_id) }}_predicate() <= instance_predicate())
 
     {% endfor %}
 
     attr_table = {{'{'}}{{ attr_table()|indent(18) }}}
+
+    value_table = {{'{'}}{{ attr_table("'")|indent(18) }}}
 
     {% for rnum in referential(class).defined %}
     {{ rnum }}_ref_table = {{ ref_table(rnum)|indent(20) }}
@@ -116,7 +124,7 @@ class {{ code_name(class.name) }}:
     -dummy
 
     @classmethod    
-    def query(cls, input):
+    def constraint(cls, input):
         result = no_condition()
         for key, value in input.items():
             result &= (cls.attr_table[key] == value)
@@ -125,7 +133,7 @@ class {{ code_name(class.name) }}:
     {% for rnum in referential(class).defined %}
     @classmethod
     {% set has_variants = referential(class).inclusion[rnum].has_variants %}
-    def {{ rnum }}(cls, {{ "key, " if has_variants}}constraint):
+    def {{ rnum }}(cls, constraint{{ ", key" if has_variants}}):
         input = constraint._variables()
         result = no_condition()
         for attr_source, attr_ref in cls.{{ rnum }}_ref_table{{ "[key]" if has_variants}}:
@@ -137,27 +145,55 @@ class {{ code_name(class.name) }}:
 
     {% endfor %}
     @staticmethod
-    def new(constraint):
-    
-        if {{ code_name(class.name) }}.id_exists(constraint):
-            raise ManaException()
-
-        head = {{ instance()|indent(15) }}
-        (head <= constraint)
-
-        if not {{ code_name(class.name) }}.id_exists(constraint):
-            raise ManaException()
-
-        return (head & constraint)
-      
-    {% for at_id in id(class).defined %}
-    @staticmethod
-    def id{{ id2num(at_id) }}_exists(constraint):
-        head = {{ instance_id(at_id)|indent(15) }}
+    def rank(head, constraint):
         head_var = set(head._variables().keys())
         constraint_var = set(constraint._variables().keys())
         if not head_var.issubset(constraint_var):
             raise ManaException()
+
+    @classmethod
+    def new(cls, constraint):
+    
+        if {{ code_name(class.name) }}.any_id(constraint):
+            raise ManaException()
+
+        head = cls.instance_predicate()
+        cls.rank(head, constraint)
+        (head <= constraint)
+
+        if not {{ code_name(class.name) }}.all_id(constraint):
+            raise ManaException()
+
+        return (head & constraint)
+
+    @classmethod
+    def value(cls, constraint, attribute):
+        output_list = constraint._variables()[cls.value_table[attribute]].data
+        if len(output_list) != 1:
+            raise ManaException()
+        return output_list[0]
+
+    @classmethod
+    def query(cls, constraint):
+        head = cls.instance_predicate()
+        my_query = (head & constraint)
+        variables =[globals()[var] for var in my_query._variables().keys()]
+        def to_constraint(instace):
+            result = no_condition()
+            for var, value in zip(variables, instace):
+                result &= (var == value)
+            return result
+        return [to_constraint(instace) for instace in my_query.data]
+
+    @classmethod
+    def all(cls):
+        return cls.query(no_condition())
+
+    {% for at_id in id(class).defined %}
+    @classmethod
+    def id{{ id2num(at_id) }}_exists(cls, constraint):
+        head = cls.id{{ id2num(at_id) }}_predicate()
+        cls.rank(head, constraint)
         number_of_answers = _len(head & constraint)
         if number_of_answers > 1:
             raise ManaException()
@@ -165,8 +201,12 @@ class {{ code_name(class.name) }}:
 
     {% endfor %}
     @staticmethod
-    def id_exists(constraint):
-        return ({{ id_exists()|indent(14) }})
+    def all_id(constraint):
+        return ({{ id_exists('&')|indent(14) }})
+
+    @staticmethod
+    def any_id(constraint):
+        return ({{ id_exists('|')|indent(14) }})
 
 {% endfor %}
 {% endfor %}

@@ -52,6 +52,19 @@ class ManaRefAttrNotFoundException(ManaException):
         part5 = '"' + '", "'.join(self.attributes) + '"'
         text = part1 + part2 + part3 + part4 + part5
         return output_str(text)
+
+class ManaTypeNotDefiedException(ManaException):
+    def __init__(self, attributes : list):
+        self.attributes = attributes
+        
+    def __str__(self):
+        text = 'Type not defined for the following list of attributes:'
+        for _class, attr, subsys in self.attributes:
+            part1 = f'\n* at Class: "{_class}"'
+            part2 = f', Attribute: "{attr}"'
+            part3 = f' in Subsystem: "{subsys}"'
+            text += part1 + part2 + part3 
+        return output_str(text)
     
 class ManaMultipleClassDeclarationException(ManaException):
     def __init__(self, _class : str, subsys1 : str, subsys2 : str):
@@ -89,7 +102,7 @@ class ManaClassMissingInSubsystemException(ManaException):
         
     def __str__(self):
         part1 = f'Class: "{self._class}"'
-        part2 = f' is missing in Subsystem: "{self.from_subsys}"'
+        part2 = f' is missing in Subsystem: "{self.subsys}"'
         text = part1 + part2
         return output_str(text)
     
