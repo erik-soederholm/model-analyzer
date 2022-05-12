@@ -18,7 +18,9 @@ A{{ _calss.cnum }}_
 '{{ a_num() }}{{ code_name(attribute.name) }}'{{ ",\n" if not loop.last }}
 {%- endfor %} 
 {%- endmacro %}
-pyDatalog.create_terms({{ var_attr_as_text()|indent(23)}})
+pyDatalog.create_terms({{ var_attr_as_text()|indent(23) }},
+                       '{{ symb_name(class.name) }}_i',
+                       '{{ symb_name(class.name) }}_id')
 {% endfor %}
 {% endfor %}
 
@@ -65,25 +67,19 @@ A{{ _calss.cnum }}_
 {%- endif %}
 {%- endmacro %}
 {% macro instance()%}
-instance('{{ domain }}',
-         '{{ class.name }}',
 {% for attribute in class.attributes %}
-          {{ a_num() }}{{ code_name(attribute.name)}}{{ ")" if loop.last else ",\n" }}
+{{ a_num() }}{{ code_name(attribute.name)}}{{ ",\n" if not loop.last }}
 {%- endfor %}
 {%- endmacro %}
 {% macro dummy_instance()%}
-instance('{{ domain }}',
-         '{{ class.name }}',
 {% for attribute in class.attributes %}
-          ''{{ ")" if loop.last else ",\n" }}
+''{{ ",\n" if not loop.last }}
 {%- endfor %}
 {%- endmacro %}
 {% macro instance_id(at_id)%}
-instance_id('{{ domain }}',
-            '{{ class.name }}',
-            '{{ at_id }}',
+'{{ at_id }}',
 {% for attribute in id(class).inclusion[at_id] %}
-             {{ a_num() }}{{ code_name(attribute)}}{{ ")" if loop.last else ",\n"}}
+{{ a_num() }}{{ code_name(attribute)}}{{ ",\n" if not loop.last }}
 {%- endfor %}
 {%- endmacro %}
 {% macro id2num(at_id)%}
@@ -98,13 +94,15 @@ class {{ code_name(class.name) }}:
     # rules for {{class.name}}...
 
     instance_predicate = (
-        lambda : {{ instance()|indent(17) }})
+        lambda : {{ symb_name(class.name) }}_i(
+            {{ instance()|indent(12) }}))
 
 
     {% for at_id in id(class).defined %}
     # rule for id: {{at_id}}
     id{{ id2num(at_id) }}_predicate = (
-        lambda : {{ instance_id(at_id)|indent(20) }})
+        lambda : {{ symb_name(class.name) }}_id(
+            {{ instance_id(at_id)|indent(12) }}))
 
     (id{{ id2num(at_id) }}_predicate() <= instance_predicate())
 
@@ -119,7 +117,8 @@ class {{ code_name(class.name) }}:
 
     {% endfor %}
     # Somehow datalog needs some exeriance before it works =( 
-    dummy = ({{ dummy_instance()|indent(13) }})
+    dummy = ({{ symb_name(class.name) }}_i(
+        {{ dummy_instance()|indent(8) }}))
     +dummy
     -dummy
 
