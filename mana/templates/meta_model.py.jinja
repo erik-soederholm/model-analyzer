@@ -1,30 +1,6 @@
-from pyDatalog import pyDatalog
+from __future__ import annotations
+from typing import Union, Callable, Any, TypeVar
 from mana.warnings_and_exceptions import *
-
-pyDatalog.create_terms('instance', 'instance_id', 'no_condition')
-
-# Add all Attributes as variables:
-
-{% for subsystem in subsystems %}
-# Subsystem: {{subsystem.name.subsys_name}}
-
-{% for class in subsystem.classes %}
-# Class: {{code_name(class.name)}}
-{% macro a_num(_calss=class)%}
-A{{ _calss.cnum }}_
-{%- endmacro %}
-{% macro var_attr_as_text()%}
-{% for attribute in class.attributes %}
-'{{ a_num() }}{{ code_name(attribute.name) }}'{{ ",\n" if not loop.last }}
-{%- endfor %} 
-{%- endmacro %}
-pyDatalog.create_terms({{ var_attr_as_text()|indent(23) }},
-                       '{{ symb_name(class.name) }}_i',
-                       '{{ symb_name(class.name) }}_id')
-{% endfor %}
-{% endfor %}
-
-+no_condition() #Adding no_condition as a valid 'True' awser..
 
 {% for subsystem in subsystems %}
 # Subsystem: {{subsystem.name.subsys_name}}
@@ -47,9 +23,7 @@ A{{ _calss.cnum }}_
 {% for source_attribute in data.ref_attributes %}
 {% set ref_attribute = data.ref_map[source_attribute] %}
 {% set formalizing_class = data.formalizing_class %}
-{% set source_attribute_var = a_num() + code_name(source_attribute) %}
-{% set ref_attribute_var = a_num(formalizing_class) + code_name(ref_attribute) %}
-('{{ source_attribute_var }}', {{ ref_attribute_var }}){{ ",\n" if not loop.last else "," if data.ref_attributes|length == 1 }}
+('{{ source_attribute }}', '{{ ref_attribute }}'){{ ",\n" if not loop.last else "," if data.ref_attributes|length == 1 }}
 {%- endfor %}
 {%- endmacro %}
 {% macro ref_table(rnum)%}
@@ -63,12 +37,34 @@ A{{ _calss.cnum }}_
  ({{ ref_table_map(table_data.variant[key])|indent(2) }}){{ ",\n" if not loop.last }}
 {%- endfor %}}
 {%- else %}
-({{ ref_table_map(referential(class).inclusion[rnum].data)|indent(1) }})
+({{ ref_table_map(table_data.data)|indent(1) }})
 {%- endif %}
 {%- endmacro %}
-{% macro instance()%}
+{% macro ref_class(rnum)%}
+{% set table_data = referential(class).inclusion[rnum] %}
+{% if table_data.has_variants %}
+: dict[str, Constructor[Output.{{ code_name(class.name) }}.{{ rnum }}]] = {
+{% for key in table_data.variant_keys %}
+'{{ key }}' : {{ code_name(table_data.variant[key].formalizing_class.name) }}.constraint{{ ",\n" if not loop.last }}
+{%- endfor %}}
+{%- else %}
+ = {{ code_name(table_data.data.formalizing_class.name) }}.constraint
+{%- endif %}
+{%- endmacro %}
+{% macro output_type(rnum)%}
+{% set table_data = referential(class).inclusion[rnum] %}
+{% if table_data.has_variants %}
+{{"Union["}}
+{% for key in table_data.variant_keys %}
+{{ code_name(table_data.variant[key].formalizing_class.name) }}.constraint{{ ",\n" if not loop.last }}
+{%- endfor %}]
+{%- else %}
+Union[{{ code_name(table_data.data.formalizing_class.name) }}.constraint]
+{%- endif %}
+{%- endmacro %}
+{% macro attibute_list()%}
 {% for attribute in class.attributes %}
-{{ a_num() }}{{ code_name(attribute.name)}}{{ ",\n" if not loop.last }}
+'{{ attribute.name }}'{{ ",\n" if not loop.last }}
 {%- endfor %}
 {%- endmacro %}
 {% macro dummy_instance()%}
@@ -76,10 +72,14 @@ A{{ _calss.cnum }}_
 ''{{ ",\n" if not loop.last }}
 {%- endfor %}
 {%- endmacro %}
-{% macro instance_id(at_id)%}
-'{{ at_id }}',
+{% macro id_list(at_id)%}
 {% for attribute in id(class).inclusion[at_id] %}
-{{ a_num() }}{{ code_name(attribute)}}{{ ",\n" if not loop.last }}
+'{{ attribute }}'{{ ",\n" if not loop.last }}
+{%- endfor %}
+{%- endmacro %}
+{% macro key_table_list()%}
+{% for at_id in id(class).defined %}
+(id{{ id2num(at_id) }}_list, data_table{{ id2num(at_id) }}),{{ "\n" if not loop.last }}
 {%- endfor %}
 {%- endmacro %}
 {% macro id2num(at_id)%}
@@ -93,119 +93,148 @@ A{{ _calss.cnum }}_
 class {{ code_name(class.name) }}:
     # rules for {{class.name}}...
 
-    instance_predicate = (
-        lambda : {{ symb_name(class.name) }}_i(
-            {{ instance()|indent(12) }}))
-
+    attr_list = [{{ attibute_list()|indent(17) }}]
 
     {% for at_id in id(class).defined %}
-    # rule for id: {{at_id}}
-    id{{ id2num(at_id) }}_predicate = (
-        lambda : {{ symb_name(class.name) }}_id(
-            {{ instance_id(at_id)|indent(12) }}))
-
-    (id{{ id2num(at_id) }}_predicate() <= instance_predicate())
-
+    data_table{{ id2num(at_id) }}: dict[tuple, {{ code_name(class.name) }}.constraint] = dict()
     {% endfor %}
 
-    attr_table = {{'{'}}{{ attr_table()|indent(18) }}}
-
-    value_table = {{'{'}}{{ attr_table("'")|indent(18) }}}
-
-    {% for rnum in referential(class).defined %}
-    {{ rnum }}_ref_table = {{ ref_table(rnum)|indent(20) }}
-
+    {% for at_id in id(class).defined %}
+    id{{ id2num(at_id) }}_list = [{{ id_list(at_id)|indent(16) }}]
     {% endfor %}
-    # Somehow datalog needs some exeriance before it works =( 
-    dummy = ({{ symb_name(class.name) }}_i(
-        {{ dummy_instance()|indent(8) }}))
-    +dummy
-    -dummy
 
-    @classmethod    
-    def constraint(cls, input):
-        result = no_condition()
-        for key, value in input.items():
-            result &= (cls.attr_table[key] == value)
-        return result
+    key_table_list = ({{ key_table_list()|indent(22) }})
+
+    class constraint:
+        def __init__(self, input : dict):
+            if not set(input.keys()).issubset(set({{ code_name(class.name) }}.attr_list)):
+                raise ManaException()
+            self.data = input
+        
+        def try_key(self, id_list : list) -> tuple | None:
+            if set(id_list).issubset(set(self.data.keys())):
+                return tuple(self.data[attr] for attr in id_list)
+            else:
+                return None
+        
+        def to_key(self, id_list : list) -> tuple:
+            return_value = self.try_key(id_list)
+            if return_value is None:
+                raise ManaException()
+            return return_value
+        
+        def is_value_subset(self, other_c : {{ code_name(class.name) }}.constraint) -> bool:
+            for key, value in self.data.items():
+                if value != other_c.data[key]:
+                    return False
+            return True
+        
+        def __and__(self, other_c : {{ code_name(class.name) }}.constraint):
+            if type(other_c) is not {{ code_name(class.name) }}.constraint:
+                raise ManaException() # bad otherwise!
+            for key in set(self.data.keys()) & set(other_c.data.keys()):
+                if self.data[key] != other_c.data[key]:
+                    raise ManaException() # only ok if values is the same!
+            return {{ code_name(class.name) }}.constraint(self.data | other_c.data)        
+        
+        def __getitem__(self, key):
+            return self.data[key]
 
     {% for rnum in referential(class).defined %}
     @classmethod
     {% set has_variants = referential(class).inclusion[rnum].has_variants %}
-    def {{ rnum }}(cls, constraint{{ ", key" if has_variants}}):
-        input = constraint._variables()
-        result = no_condition()
-        for attr_source, attr_ref in cls.{{ rnum }}_ref_table{{ "[key]" if has_variants}}:
-            value = input[attr_source]
-            if len(value) != 1:
-                raise ManaException()
-            result &= (attr_ref == value.data[0])
-        return result
+    def {{ rnum }}(cls, constraint: {{ code_name(class.name) }}.constraint{{ ", key : str" if has_variants}}) -> Output.{{ code_name(class.name) }}.{{ rnum }}:
+        ref_table = {{ ref_table(rnum)|indent(24) }}
+
+        ref_class{{ ref_class(rnum)|indent(12) }}
+
+        result_dict = {attr_ref : constraint[attr_source]
+                for attr_source, attr_ref in ref_table{{ "[key]" if has_variants}}}
+        return ref_class{{ "[key]" if has_variants}}(result_dict)
 
     {% endfor %}
-    @staticmethod
-    def rank(head, constraint):
-        head_var = set(head._variables().keys())
-        constraint_var = set(constraint._variables().keys())
-        if not head_var.issubset(constraint_var):
-            raise ManaException()
-
     @classmethod
-    def new(cls, constraint):
+    def new(cls, constraint : {{ code_name(class.name) }}.constraint):
+        
+        # Check that constraint is containg all attributes for the class
+        if set(constraint.data.keys()) != set(cls.attr_list):
+            raise ManaException()
     
-        if {{ code_name(class.name) }}.any_id(constraint):
+        # Check that no duplicate exists for any id (I, I2, I3)
+        if cls.any_id(constraint):
             raise ManaException()
+        
+        # Add instance
+        for id_list, table in cls.key_table_list:
+            table[constraint.to_key(id_list)] = constraint
 
-        head = cls.instance_predicate()
-        cls.rank(head, constraint)
-        (head <= constraint)
-
-        if not {{ code_name(class.name) }}.all_id(constraint):
-            raise ManaException()
-
-        return (head & constraint)
+        return constraint
+    
+    @classmethod
+    def value(cls, constraint: {{ code_name(class.name) }}.constraint, attribute: str) -> Any:
+        return constraint[attribute]
 
     @classmethod
-    def value(cls, constraint, attribute):
-        output_list = constraint._variables()[cls.value_table[attribute]].data
-        if len(output_list) != 1:
-            raise ManaException()
-        return output_list[0]
+    def query(cls, constraint: {{ code_name(class.name) }}.constraint):
 
-    @classmethod
-    def query(cls, constraint):
-        head = cls.instance_predicate()
-        my_query = (head & constraint)
-        variables =[globals()[var] for var in my_query._variables().keys()]
-        def to_constraint(instace):
-            result = no_condition()
-            for var, value in zip(variables, instace):
-                result &= (var == value)
-            return result
-        return [to_constraint(instace) for instace in my_query.data]
+        for id_list, table in cls.key_table_list:
+            key = constraint.try_key(id_list)
+            if key is not None:
+                # if there is an valid key => either the item exists or not
+                return [table[key]] if key in table else []
+
+        output = []
+        for candidate in cls.data_table1.values():
+            if constraint.is_value_subset(candidate):
+                output.append(candidate)
+        return output 
 
     @classmethod
     def all(cls):
-        return cls.query(no_condition())
+        return list(cls.data_table1.values())
 
-    {% for at_id in id(class).defined %}
     @classmethod
-    def id{{ id2num(at_id) }}_exists(cls, constraint):
-        head = cls.id{{ id2num(at_id) }}_predicate()
-        cls.rank(head, constraint)
-        number_of_answers = _len(head & constraint)
-        if number_of_answers > 1:
-            raise ManaException()
-        return (number_of_answers == 1)
+    def op_id(cls, op: Callable[[list[bool]], bool], constraint: {{ code_name(class.name) }}.constraint) -> bool:
+        return op([constraint.to_key(id_list) in table 
+                   for id_list, table in cls.key_table_list])
 
-    {% endfor %}
-    @staticmethod
-    def all_id(constraint):
-        return ({{ id_exists('&')|indent(14) }})
+    @classmethod
+    def all_id(cls, constraint : {{ code_name(class.name) }}.constraint) -> bool:
+        return cls.op_id(all, constraint)
+    
+    @classmethod
+    def any_id(cls, constraint : {{ code_name(class.name) }}.constraint) -> bool:
+        return cls.op_id(any, constraint)
 
-    @staticmethod
-    def any_id(constraint):
-        return ({{ id_exists('|')|indent(14) }})
+{% endfor %}
 
+{% endfor %}
+
+# Typing information
+
+T = TypeVar('T')
+Constructor = Callable[[dict[str,Any]], T]
+
+class Output:
+{% for subsystem in subsystems %}
+    # Subsystem: {{subsystem.name.subsys_name}}
+{% for class in subsystem.classes %}
+{% macro output_type(rnum)%}
+{% set table_data = referential(class).inclusion[rnum] %}
+{% if table_data.has_variants %}
+{{"Union["}}
+{% for key in table_data.variant_keys %}
+{{ code_name(table_data.variant[key].formalizing_class.name) }}.constraint{{ ",\n" if not loop.last }}
+{%- endfor %}]
+{%- else %}
+Union[{{ code_name(table_data.data.formalizing_class.name) }}.constraint]
+{%- endif %}
+{%- endmacro %}
+{% for rnum in referential(class).defined %}
+{% if loop.first %}
+    class {{ code_name(class.name) }}:
+{% endif %}
+        {{ rnum }} = {{ output_type(rnum)|indent(12) }}
+{% endfor %}
 {% endfor %}
 {% endfor %}

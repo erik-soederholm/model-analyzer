@@ -9,7 +9,7 @@ setuptools.setup(name='mana',
       license='MIT',
       packages=setuptools.find_packages(),
       zip_safe=False,
-      install_requires=["pathlib", "flatland", "Jinja2", "pyDatalog"],
+      install_requires=["pathlib", "flatland", "Jinja2"],
       entry_points={
             "console_scripts": [
                   "mana=mana.__main__:main"

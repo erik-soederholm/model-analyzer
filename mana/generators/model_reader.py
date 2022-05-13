@@ -1,14 +1,15 @@
 import pprint
 import sys
 from pathlib import Path
-from flatland.input.model_parser import ModelParser
+from typing import Any
+from flatland.input.model_parser import ModelParser, Subsystem
 from flatland.flatland_exceptions import ModelParseError
 from mana.warnings_and_exceptions import *
 
 
 class ModelReader:
     def __init__(self, jobs: dict):
-        self.subsystems = []
+        self.subsystems: list[Subsystem] = []
         self.jobs = jobs
 
     def parse(self):
@@ -25,9 +26,9 @@ class ModelReader:
             pp = pprint.PrettyPrinter(indent=2, stream=data_file)
             pp.pprint(dict(self.subsystems[0]._asdict()))
 
-    def id(self, input: dict()):
+    def id(self, input: dict):
         """ pure function """
-        output = {'defined': [], 'inclusion': {'I': [], 'I2': [], 'I3': []}}
+        output: dict[str, Any]= {'defined': [], 'inclusion': {'I': [], 'I2': [], 'I3': []}}
         if 'attributes' in input:
             defined_set = set()
             for attr in input['attributes']:
@@ -43,7 +44,7 @@ class ModelReader:
             output['defined'] = ['I']
         return output
 
-    def referential(self, input: dict()):
+    def referential(self, input: dict):
         """ function using self.referential_table """
         class_name = input['name']
         return self.referential_table[class_name]
@@ -239,7 +240,6 @@ class ModelReader:
             if 'ignore attributes' in _class:
                 ignore_set = {attr['name']
                               for attr in _class['ignore attributes']}
-                remove_list = []
                 for source, ref in attr_map.items():
                     if ref in ignore_set:
                         remove_list.append(source)
