@@ -6,32 +6,15 @@ from mana.warnings_and_exceptions import *
 # Subsystem: {{subsystem.name.subsys_name}}
 
 {% for class in subsystem.classes %}
-{% macro a_num(_calss=class)%}
-A{{ _calss.cnum }}_
-{%- endmacro %}
-{% macro var_attr_as_text()%}
-{% for attribute in class.attributes %}
-'{{ a_num() }}{{ code_name(attribute.name) }}'{{ ",\n" if not loop.last }}
-{%- endfor %} 
-{%- endmacro %}
-{% macro attr_table(spacer='')%}
-{% for attribute in class.attributes %}
-'{{ attribute.name }}' : {{ spacer }}{{ a_num() }}{{ code_name(attribute.name) }}{{ spacer }}{{ ",\n" if not loop.last }}
-{%- endfor %} 
-{%- endmacro %}
 {% macro ref_table_map(data)%}
 {% for source_attribute in data.ref_attributes %}
 {% set ref_attribute = data.ref_map[source_attribute] %}
-{% set formalizing_class = data.formalizing_class %}
 ('{{ source_attribute }}', '{{ ref_attribute }}'){{ ",\n" if not loop.last else "," if data.ref_attributes|length == 1 }}
 {%- endfor %}
 {%- endmacro %}
 {% macro ref_table(rnum)%}
 {% set table_data = referential(class).inclusion[rnum] %}
-{% set has_variants = table_data.has_variants %}
-{% if has_variants %}
-{% set key_list = table_data.variant_keys %}
-{% set variant = table_data.variant %}
+{% if table_data.has_variants %}
 {{"{"}}{% for key in table_data.variant_keys %}
 {{ " " if not loop.first }}'{{ key }}' :
  ({{ ref_table_map(table_data.variant[key])|indent(2) }}){{ ",\n" if not loop.last }}
@@ -51,25 +34,9 @@ A{{ _calss.cnum }}_
  = {{ code_name(table_data.data.formalizing_class.name) }}.constraint
 {%- endif %}
 {%- endmacro %}
-{% macro output_type(rnum)%}
-{% set table_data = referential(class).inclusion[rnum] %}
-{% if table_data.has_variants %}
-{{"Union["}}
-{% for key in table_data.variant_keys %}
-{{ code_name(table_data.variant[key].formalizing_class.name) }}.constraint{{ ",\n" if not loop.last }}
-{%- endfor %}]
-{%- else %}
-Union[{{ code_name(table_data.data.formalizing_class.name) }}.constraint]
-{%- endif %}
-{%- endmacro %}
 {% macro attibute_list()%}
 {% for attribute in class.attributes %}
 '{{ attribute.name }}'{{ ",\n" if not loop.last }}
-{%- endfor %}
-{%- endmacro %}
-{% macro dummy_instance()%}
-{% for attribute in class.attributes %}
-''{{ ",\n" if not loop.last }}
 {%- endfor %}
 {%- endmacro %}
 {% macro id_list(at_id)%}
@@ -84,11 +51,6 @@ Union[{{ code_name(table_data.data.formalizing_class.name) }}.constraint]
 {%- endmacro %}
 {% macro id2num(at_id)%}
 {{{'I': '1', 'I2' : '2', 'I3' : '3'}[at_id]}}
-{%- endmacro %}
-{% macro id_exists(operator)%}
-{% for at_id in id(class).defined %}
-{{ code_name(class.name) }}.id{{ id2num(at_id) }}_exists(constraint){{ "\n" + operator + " " if not loop.last}}
-{%- endfor %}
 {%- endmacro %}
 class {{ code_name(class.name) }}:
     # rules for {{class.name}}...
