@@ -2,6 +2,7 @@
 import sys
 import json
 from pathlib import Path
+import time
 
 from mana.generators.meta_model_generator import MetaModelGenerator
 from mana.warnings_and_exceptions import ManaException
@@ -26,6 +27,7 @@ def main():
     
     
     try:
+        start_time = time.time()
         mmg.parse()
         mmg.interpret()
         mmg.generate()
@@ -34,7 +36,11 @@ def main():
         mi = ModelInstantiator(job)
         mi.parse()
         mi.interpret()
+        instantiate_start_time=time.time()
+        print("Pre instantiate:",round(instantiate_start_time - start_time,0),'secs',end='\n')
         mi.instantiate()
+        end_time = time.time()
+        print("Instantiate:",round(end_time - instantiate_start_time,0),'secs',end='\n')
     except ManaException as e:
         if e.exit():
             sys.exit(e)

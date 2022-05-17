@@ -14,7 +14,7 @@ class MetaModelGenerator(ModelReader):
         
     def symb_name(self, name : str):
         """ pure function """
-        return code_name(name).lower()
+        return self.code_name(name).lower()
         
     def generate(self):
         

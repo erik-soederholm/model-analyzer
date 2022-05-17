@@ -20,7 +20,7 @@ class ModelInstantiator(ModelReader):
         
     def symb_name(self, name : str):
         """ pure function """
-        return code_name(name).lower()
+        return self.code_name(name).lower()
     
     def type_name(self, variant, _type):
         if variant == 'type':
@@ -278,7 +278,7 @@ class ModelInstantiator(ModelReader):
             superclass_i = MM.Superclass.new(r102)
             r103 = MM.Superclass.R103(superclass_i)
             r170 = MM.Superclass.R170(superclass_i)
-            if len(generalization_i & r103) != 1:
+            if len(MM.Generalization.query(generalization_i & r103)) != 1:
                 raise ManaException() # Check R103!
             for subclass_name in rel['subclasses']:
                 class_i_subclass = self.query_class(modeled_domain_i, subclass_name)
