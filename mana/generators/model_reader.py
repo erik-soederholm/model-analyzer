@@ -59,6 +59,7 @@ class ModelReader:
         self.class_table = dict()
         self.class_to_subsys = dict()
         self.referential_table = dict()
+        self.ordinal_table = dict()
         self.class_attribute_table = dict()
         self.type_table = {'type' : [], 'union_type' : []}
         
@@ -210,6 +211,107 @@ class ModelReader:
                                         for nav_item in attr['nav_rnum']]
 
     def interpret_referential(self):
+
+        for class_name, _class in self.class_table.items():
+            if 'attributes' in _class:
+                ordinal_rnum_set = set()
+                defined_set = set()
+                inclusion_table = dict()
+                nav_table = dict()
+                general_rename_table = dict()
+                all_attributes = []
+                for attribute_type in ['attributes', 'ignore attributes']:
+                    if attribute_type in _class:
+                        all_attributes += _class[attribute_type]
+
+                for attr in all_attributes:
+                    # Add each attribute to the inclusion_table based on its relations
+                    nav_rnum_set = set()
+                    if 'nav_rnum' in attr:
+                        nav_rnum_set = {nav_item['rnum'] for nav_item in attr['nav_rnum']}
+                        if 'union_rnum' in attr:
+                            # for now remove all 'union_rnum' attr
+                            nav_rnum_set = nav_rnum_set - set(attr['union_rnum'])
+
+                    rnum_set = set(nav_rnum_set)
+                    if 'rnum' in attr:
+                        for rnum in attr['rnum']:
+                            # for now remove all 'ORxxx'
+                            if rnum[0] != 'O':
+                                rnum_set.add(rnum)
+                            else:
+                                ordinal_rnum_set.add(rnum)
+                        if 'union_rnum' in attr:
+                            # for now remove all 'union_rnum' attr
+                            rnum_set = rnum_set - set(attr['union_rnum'])
+
+                    for rnum in rnum_set:
+                        if rnum not in defined_set:
+                            defined_set |= {rnum}
+                            inclusion_table[rnum] = []
+                            nav_table[rnum] = dict()
+                            general_rename_table[rnum] = dict()
+                        inclusion_table[rnum].append(attr['name'])
+
+                        if rnum in nav_rnum_set:
+                            nav_entry = dict()
+                            for nav_item in attr['nav_rnum']:
+                                if nav_item['rnum'] == rnum:
+                                    if nav_item['side'] in nav_entry:
+                                        raise ManaException()  # Error duplicate navigation!
+                                    nav_entry[nav_item['side']] = nav_item
+                            nav_table[rnum][attr['name']] = nav_entry
+
+                    if 'ref_name' in attr:
+                        for rnum, ref_name in attr['ref_name']:
+                            if rnum in general_rename_table:
+                                if attr['name'] in general_rename_table[rnum]:
+                                    raise ManaException()  # Error redundent!
+                                general_rename_table[rnum][attr['name']] = ref_name
+                for rnum in ordinal_rnum_set:
+                    self.interpret_ordinal_relationship(rnum, _class)
+                
+                for rnum in defined_set:
+                    self.interpret_referential_attributes(rnum, _class, inclusion_table, nav_table, general_rename_table)
+
+    def interpret_ordinal_relationship(self, rnum: str, _class: dict):
+        ''' Check Ordinal Relationship '''
+        class_name = _class['name']
+        
+        rel = self.relation_table[rnum]
+        if class_name != rel['p_side']['cname'] or class_name != rel['t_side']['cname']:
+            raise ManaException()
+        attribute_list = [attr for attr in _class['attributes'] if rnum in attr.get('rnum', {})]
+        id_info = self.id(_class)
+        ordinal_id = ''
+        for id_key in id_info['defined']:
+            if set(id_info['inclusion'][id_key]) == {attr['name'] for attr in attribute_list}:
+                if ordinal_id == '':
+                    ordinal_id = id_key
+                else:
+                    raise ManaException()
+        if ordinal_id == '':
+            raise ManaException()
+                
+        ranking_attr = ''                    
+        for attr in attribute_list:
+            if rnum in attr.get('ranking_rnum', {}):
+                if ranking_attr == '':
+                    ranking_attr = attr['name']
+                else:
+                    raise ManaException()
+        if ranking_attr == '':
+            raise ManaException()
+        
+        self.ordinal_table[rnum] = {
+            'class' : class_name, 
+            'id' : ordinal_id, 
+            'ranking_attribute' : ranking_attr,
+            'ascending' : rel['t_side']['phrase'],
+            'descending' : rel['p_side']['phrase']}
+
+    def interpret_referential_attributes(self, rnum: str, _class: dict, inclusion_table: dict, nav_table: dict, general_rename_table: dict):                           
+        
         def rel_other_end(rnum, my_end):
             if rnum not in self.relation_table:
                 raise ManaUnknownReferentialAttributeException(
@@ -250,7 +352,7 @@ class ModelReader:
                 for key in remove_list:
                     del out[key]
                 return out
-
+                
         def id_as_attr_ref(source_classes, ref_class, input_free_attr_refs, free_rename_attr, rnum):
             def ref_attributes():
                 out = []
@@ -405,146 +507,94 @@ class ModelReader:
                     rnum, ref_class['name'], self.class_to_subsys[ref_class['name']], ref_attributes())  # can not find attr source
             return out
 
-        for class_name, _class in self.class_table.items():
-            if 'attributes' in _class:
-                defined_set = set()
-                inclusion_table = dict()
-                nav_table = dict()
-                general_rename_table = dict()
-                all_attributes = []
-                for attribute_type in ['attributes', 'ignore attributes']:
-                    if attribute_type in _class:
-                        all_attributes += _class[attribute_type]
-
-                for attr in all_attributes:
-                    # Add each attribute to the inclusion_table based on its relations
-                    nav_rnum_set = set()
-                    if 'nav_rnum' in attr:
-                        nav_rnum_set = {nav_item['rnum'] for nav_item in attr['nav_rnum']}
-                        if 'union_rnum' in attr:
-                            # for now remove all 'union_rnum' attr
-                            nav_rnum_set = nav_rnum_set - set(attr['union_rnum'])
-
-                    rnum_set = set(nav_rnum_set)
-                    if 'rnum' in attr:
-                        for rnum in attr['rnum']:
-                            # for now remove all 'ORxxx'
-                            if rnum[0] != 'O':
-                                rnum_set.add(rnum)
-                        if 'union_rnum' in attr:
-                            # for now remove all 'union_rnum' attr
-                            rnum_set = rnum_set - set(attr['union_rnum'])
-
-                    for rnum in rnum_set:
-                        if rnum not in defined_set:
-                            defined_set |= {rnum}
-                            inclusion_table[rnum] = []
-                            nav_table[rnum] = dict()
-                            general_rename_table[rnum] = dict()
-                        inclusion_table[rnum].append(attr['name'])
-
-                        if rnum in nav_rnum_set:
-                            nav_entry = dict()
-                            for nav_item in attr['nav_rnum']:
-                                if nav_item['rnum'] == rnum:
-                                    if nav_item['side'] in nav_entry:
-                                        raise ManaException()  # Error duplicate navigation!
-                                    nav_entry[nav_item['side']] = nav_item
-                            nav_table[rnum][attr['name']] = nav_entry
-
-                    if 'ref_name' in attr:
-                        for rnum, ref_name in attr['ref_name']:
-                            if rnum in general_rename_table:
-                                if attr['name'] in general_rename_table[rnum]:
-                                    raise ManaException()  # Error redundent!
-                                general_rename_table[rnum][attr['name']] = ref_name
-
-                for rnum in defined_set:
-                    source_table = rel_other_end(rnum, class_name)
-                    bound_attr = dict()
-                    bound_rename_table = dict()
-                    free_attr = []
-                    for side in source_table.keys():
-                        bound_attr[side] = []
-                        bound_rename_table[side] = dict()
-                    for attr in inclusion_table[rnum]:
-                        if attr in nav_table[rnum]:
-                            for side, nav_data in nav_table[rnum][attr].items():
-                                if side not in source_table.keys():
-                                    raise ManaException()  # Error!
-                                if nav_data['class'] != source_table[side]:
-                                    raise ManaException()  # Error!
-                                bound_attr[side].append(attr)
-                                if 'attr_source' in nav_data:
-                                    #attr_source_name = nav_data['attr_source'].lower()
-                                    bound_rename_table[side][attr] = nav_data['attr_source']
-                                    if rnum in general_rename_table:
-                                        if attr in general_rename_table[rnum]:
-                                            raise ManaException()  # Error! duplicate!
-                                else:
-                                    if rnum in general_rename_table:
-                                        if attr in general_rename_table[rnum]:
-                                            bound_rename_table[side][attr] = general_rename_table[rnum][attr]
-                        else:
-                            free_attr.append(attr)
-
-                    source_data = []
-                    for side, source_class_name in source_table.items():
-                        source_data.append([self.class_table[source_class_name],
-                                            side, bound_attr[side],
-                                            bound_rename_table[side]])
-
-                    ref_list = id_as_attr_ref(
-                        source_data, _class, free_attr, general_rename_table[rnum], rnum)
-
-                    has_variants = False
-                    if ref_list[0]['side'] == 'superclass':
-                        reference_type = 'superclass'
-                        relationship_type = 'generalization'
-                        has_variants = True
-                    elif len(ref_list) == 2:
-                        reference_type = 'associative'
-                        if ref_list[0]['class_name'] == ref_list[1]['class_name']:
-                            relationship_type = 'binary_reflexive'
-                            has_variants = True
-                        else:
-                            relationship_type = 'binary'
+        ''' Check none Ordinal Relationship formelized by referential attributes'''    
+        class_name = _class['name']
+        
+        source_table = rel_other_end(rnum, class_name)
+        bound_attr = dict()
+        bound_rename_table = dict()
+        free_attr = []
+        for side in source_table.keys():
+            bound_attr[side] = []
+            bound_rename_table[side] = dict()
+        for attr in inclusion_table[rnum]:
+            if attr in nav_table[rnum]:
+                for side, nav_data in nav_table[rnum][attr].items():
+                    if side not in source_table.keys():
+                        raise ManaException()  # Error!
+                    if nav_data['class'] != source_table[side]:
+                        raise ManaException()  # Error!
+                    bound_attr[side].append(attr)
+                    if 'attr_source' in nav_data:
+                        #attr_source_name = nav_data['attr_source'].lower()
+                        bound_rename_table[side][attr] = nav_data['attr_source']
+                        if rnum in general_rename_table:
+                            if attr in general_rename_table[rnum]:
+                                raise ManaException()  # Error! duplicate!
                     else:
-                        reference_type = 'to_one'
-                        relationship_type = 'binary'
+                        if rnum in general_rename_table:
+                            if attr in general_rename_table[rnum]:
+                                bound_rename_table[side][attr] = general_rename_table[rnum][attr]
+            else:
+                free_attr.append(attr)
 
-                    for ref in ref_list:
-                        ref_table_entry = self.referential_table[ref['class_name']]
-                        if rnum not in ref_table_entry['defined']:
-                            ref_table_entry['defined'].append(rnum)
-                            ref_table_entry['defined'].sort()
-                            ref_table_entry['inclusion'][rnum] = {
-                                'reference_type': reference_type,
-                                'relationship_type': relationship_type,
-                                'has_variants': has_variants}
-                            if has_variants:
-                                ref_table_entry['inclusion'][rnum]['variant_keys'] = []
-                                ref_table_entry['inclusion'][rnum]['variant'] = dict()
+        source_data = []
+        for side, source_class_name in source_table.items():
+            source_data.append([self.class_table[source_class_name],
+                                side, bound_attr[side],
+                                bound_rename_table[side]])
 
-                        data = dict()
-                        data['ref_map'] = ref['ref_source_to_attr_map']
-                        data['ref_attributes'] = list(
-                            ref['ref_source_to_attr_map'].keys())
-                        data['ref_attributes'].sort()
-                        data['id'] = ref['id']
-                        data['side'] = ref['side']
-                        data['formalizing_class'] = _class
+        ref_list = id_as_attr_ref(
+            source_data, _class, free_attr, general_rename_table[rnum], rnum)
 
-                        if has_variants:
-                            if relationship_type == 'generalization':
-                                key = class_name
-                            elif reference_type == 'associative' and relationship_type == 'binary_reflexive':
-                                key = self.relation_table[rnum][ref['side']]['phrase']
-                            ref_table_entry['inclusion'][rnum]['variant_keys'].append(key)
-                            ref_table_entry['inclusion'][rnum]['variant_keys'].sort()
-                            ref_table_entry['inclusion'][rnum]['variant'][key] = data
-                        else:
-                            ref_table_entry['inclusion'][rnum]['data'] = data
+        has_variants = False
+        if ref_list[0]['side'] == 'superclass':
+            reference_type = 'superclass'
+            relationship_type = 'generalization'
+            has_variants = True
+        elif len(ref_list) == 2:
+            reference_type = 'associative'
+            if ref_list[0]['class_name'] == ref_list[1]['class_name']:
+                relationship_type = 'binary_reflexive'
+                has_variants = True
+            else:
+                relationship_type = 'binary'
+        else:
+            reference_type = 'to_one'
+            relationship_type = 'binary'
+
+        for ref in ref_list:
+            ref_table_entry = self.referential_table[ref['class_name']]
+            if rnum not in ref_table_entry['defined']:
+                ref_table_entry['defined'].append(rnum)
+                ref_table_entry['defined'].sort()
+                ref_table_entry['inclusion'][rnum] = {
+                    'reference_type': reference_type,
+                    'relationship_type': relationship_type,
+                    'has_variants': has_variants}
+                if has_variants:
+                    ref_table_entry['inclusion'][rnum]['variant_keys'] = []
+                    ref_table_entry['inclusion'][rnum]['variant'] = dict()
+
+            data = dict()
+            data['ref_map'] = ref['ref_source_to_attr_map']
+            data['ref_attributes'] = list(
+                ref['ref_source_to_attr_map'].keys())
+            data['ref_attributes'].sort()
+            data['id'] = ref['id']
+            data['side'] = ref['side']
+            data['formalizing_class'] = _class
+
+            if has_variants:
+                if relationship_type == 'generalization':
+                    key = class_name
+                elif reference_type == 'associative' and relationship_type == 'binary_reflexive':
+                    key = self.relation_table[rnum][ref['side']]['phrase']
+                ref_table_entry['inclusion'][rnum]['variant_keys'].append(key)
+                ref_table_entry['inclusion'][rnum]['variant_keys'].sort()
+                ref_table_entry['inclusion'][rnum]['variant'][key] = data
+            else:
+                ref_table_entry['inclusion'][rnum]['data'] = data
 
     def interpret_types(self):
 
