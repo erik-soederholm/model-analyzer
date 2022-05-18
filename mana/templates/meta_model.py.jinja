@@ -90,7 +90,19 @@ class {{ code_name(class.name) }}:
                 if value != other_c.data[key]:
                     return False
             return True
-        
+
+        {% for rnum in referential(class).defined %}
+        {% set has_variants = referential(class).inclusion[rnum].has_variants %}
+        def {{ rnum }}(self{{ ", key : str" if has_variants}}) -> Output.{{ code_name(class.name) }}.{{ rnum }}:
+            ref_table = {{ ref_table(rnum)|indent(24) }}
+
+            ref_class{{ ref_class(rnum)|indent(16) }}
+
+            result_dict = {attr_ref : self.data[attr_source]
+                    for attr_source, attr_ref in ref_table{{ "[key]" if has_variants}}}
+            return ref_class{{ "[key]" if has_variants}}(result_dict)
+
+        {% endfor %}
         def __and__(self, other_c : {{ code_name(class.name) }}.constraint):
             if type(other_c) is not {{ code_name(class.name) }}.constraint:
                 raise ManaException() # bad otherwise!
@@ -106,13 +118,7 @@ class {{ code_name(class.name) }}:
     @classmethod
     {% set has_variants = referential(class).inclusion[rnum].has_variants %}
     def {{ rnum }}(cls, constraint: {{ code_name(class.name) }}.constraint{{ ", key : str" if has_variants}}) -> Output.{{ code_name(class.name) }}.{{ rnum }}:
-        ref_table = {{ ref_table(rnum)|indent(24) }}
-
-        ref_class{{ ref_class(rnum)|indent(12) }}
-
-        result_dict = {attr_ref : constraint[attr_source]
-                for attr_source, attr_ref in ref_table{{ "[key]" if has_variants}}}
-        return ref_class{{ "[key]" if has_variants}}(result_dict)
+        return constraint.{{ rnum }}({{ "key" if has_variants}})
 
     {% endfor %}
     @classmethod
@@ -137,7 +143,7 @@ class {{ code_name(class.name) }}:
         return constraint[attribute]
 
     @classmethod
-    def query(cls, constraint: {{ code_name(class.name) }}.constraint):
+    def query(cls, constraint: {{ code_name(class.name) }}.constraint) -> list[{{ code_name(class.name) }}.constraint]:
 
         for id_list, table in cls.key_table_list:
             key = constraint.try_key(id_list)

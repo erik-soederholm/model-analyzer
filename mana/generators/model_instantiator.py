@@ -1,11 +1,14 @@
 import pprint
 import sys
 import meta_model as MM
+from typing import TypeVar
 from pathlib import Path
 from mana.generators.model_reader import ModelReader
 from mana.warnings_and_exceptions import *
-    
-def exactly_one(my_list : list):
+
+T = TypeVar('T')
+
+def exactly_one(my_list : list[T]) -> T:
     if len(my_list) != 1:
         raise ManaException()
     return my_list[0]
@@ -49,8 +52,7 @@ class ModelInstantiator(ModelReader):
             {'Name' : domain_name, 
              'Alias' : domain_name})  #ToDo: fix alias to domain
         domain_i = MM.Domain.new(domain_attr)
-        r4 = MM.Domain.R4(domain_i, 'Modeled Domain')
-        modeled_domain_i = MM.Modeled_Domain.new(r4)
+        modeled_domain_i = MM.Modeled_Domain.new(domain_i.R4('Modeled Domain'))
         for subsystem in subsystem_list:
             self.instantiate_subsystem(subsystem, modeled_domain_i)
         
@@ -66,99 +68,84 @@ class ModelInstantiator(ModelReader):
             for rel in subsystem.rels:
                 self.instantiate_rel(rel, subsystem_i, modeled_domain_i)
                 
-        r = 0
         
-    def query_subsystem(self, modeled_domain_i, subsystem_name : str):
-        r3 = MM.Modeled_Domain.R3(modeled_domain_i)
-        domain_partition_i_set = MM.Domain_Partition.query(r3)
+    def query_subsystem(self, modeled_domain_i: MM.Modeled_Domain.constraint, subsystem_name : str) -> MM.Subsystem.constraint:
+        domain_partition_i_set = MM.Domain_Partition.query(modeled_domain_i.R3())
         subsystem_attr = MM.Subsystem.constraint({
             'Name' : subsystem_name})
-        for domain_partition_i in MM.Domain_Partition.query(r3):
-            r1 = MM.Domain_Partition.R1(domain_partition_i)
-            subsystem_i_set = MM.Subsystem.query(subsystem_attr & r1)
-            if len(subsystem_i_set):
+        for domain_partition_i in MM.Domain_Partition.query(modeled_domain_i.R3()):
+            subsystem_i_set = MM.Subsystem.query(subsystem_attr & domain_partition_i.R1())
+            if len(subsystem_i_set) == 1:
                 return exactly_one(subsystem_i_set)
         raise ManaException()
     
-    def query_class(self, modeled_domain_i, class_name : str):
+    def query_class(self, modeled_domain_i: MM.Modeled_Domain.constraint, class_name : str) -> MM.Class.constraint:
         domain_name = MM.Modeled_Domain.value(modeled_domain_i, 'Name')
         class_attr = MM.Class.constraint({
             'Name' : class_name,
             'Domain' : domain_name})
         return exactly_one(MM.Class.query(class_attr))
         
-    def instantiate_subsystem(self, subsystem, modeled_domain_i):
-        r3 = MM.Modeled_Domain.R3(modeled_domain_i)
-        # ToDo: add real values for 'Number'
+    def instantiate_subsystem(self, subsystem, modeled_domain_i: MM.Modeled_Domain.constraint):
         
-        min_num = min([int(''.join([ d for d in rel['rnum'] if d.isdigit()])) for rel in subsystem.rels ])
-            
-        
+        min_num = min([int(''.join([ d for d in rel['rnum'] if d.isdigit()])) for rel in subsystem.rels ])        
         domain_partition_attr = MM.Domain_Partition.constraint(
             {'Number' : min_num})
         
-        domain_partition_i = MM.Domain_Partition.new(domain_partition_attr & r3)
-        r1 = MM.Domain_Partition.R1(domain_partition_i)
+        domain_partition_i = MM.Domain_Partition.new(domain_partition_attr & modeled_domain_i.R3())
+
         name = subsystem.name['subsys_name']
         alias = subsystem.name['abbr']
         subsystem_attr = MM.Subsystem.constraint(            
             {'Name' : name,
              'Alias' : name if alias is None else alias})
-        subsystem_i = MM.Subsystem.new(subsystem_attr & r1)
+        subsystem_i = MM.Subsystem.new(subsystem_attr & domain_partition_i.R1())
         
-    def instantiate_class(self, _class, subsystem_i, modeled_domain_i):
-        r15 = MM.Modeled_Domain.R15(modeled_domain_i)
+    def instantiate_class(self, _class: dict, subsystem_i: MM.Subsystem.constraint, modeled_domain_i: MM.Modeled_Domain.constraint):
+        
         element_attr = MM.Element.constraint({'Number' : ('C', _class['cnum'])})
-        element_i = MM.Element.new(element_attr & r15)
-        r16 = MM.Element.R16(element_i, 'Subsystem Element')
-        r13 = MM.Subsystem.R13(subsystem_i)
-        subsystem_element_i = MM.Subsystem_Element.new(r13 & r16)
-        r14 = MM.Subsystem_Element.R14(subsystem_element_i, 'Class')
+        element_i = MM.Element.new(element_attr & modeled_domain_i.R15())
+
+        subsystem_element_i = MM.Subsystem_Element.new(subsystem_i.R13() & element_i.R16('Subsystem Element'))
+        
         class_attr = MM.Class.constraint(
             {'Name' : _class['name']})
-        class_i = MM.Class.new(class_attr & r14)
+        class_i = MM.Class.new(class_attr & subsystem_element_i.R14('Class'))
         for attribute in _class['attributes']:
             self.instantiate_attribute(attribute, class_i)
         
         id_data = self.id(_class)
         for _id in id_data['defined']:
-            self.instantiate_id(_id, id_data['inclusion'][_id], _class, class_i)
+            self.instantiate_id(_id, id_data['inclusion'][_id], class_i)
             
     
-    def instantiate_attribute(self, attribute, class_i):
-        r20 = MM.Class.R20(class_i)
-        attribute_name = attribute['name']
-
-        attribute_attr = MM.Attribute.constraint(
-            {'Name' : attribute_name})
+    def instantiate_attribute(self, attribute: dict, class_i: MM.Class.constraint):
 
         variant = 'type' if 'type' in attribute else 'union_type'
         type_name = self.type_name(variant, attribute[variant])
         type_attr = MM.Type.constraint({'Name' : type_name})
         type_i = exactly_one(MM.Type.query(type_attr))
-        r24 = MM.Type.R24(type_i)
-        attribute_i = MM.Attribute.new(attribute_attr & r20 & r24)
-        r25 = MM.Attribute.R25(attribute_i, 'Non Derived Attribute')
-        MM.Non_Derived_Attribute.new(r25)
         
-    def instantiate_id(self, _id, Attribute_list, _class, class_i):
+        attribute_attr = MM.Attribute.constraint(
+            {'Name' : attribute['name']})
+        attribute_i = MM.Attribute.new(attribute_attr & class_i.R20() & type_i.R24())
+        
+        MM.Non_Derived_Attribute.new(attribute_i.R25('Non Derived Attribute'))
+        
+    def instantiate_id(self, _id: str, Attribute_list: list, class_i: MM.Class.constraint):
         number = {'I' : 1, 'I2' : 2, 'I3' :3}[_id]
         identifier_attr = MM.Identifier.constraint(
             {'Number' : ('I', number)})
-        r27 = MM.Class.R27(class_i)
-        r31 = MM.Class.R31(class_i)
-        r20 = MM.Class.R20(class_i)
-        identifier_i = MM.Identifier.new(identifier_attr & r27)
-        r30 = MM.Identifier.R30(identifier_i, 'Irreducible Identifier')
-        r22_identifier = MM.Identifier.R22(identifier_i)
-        MM.Irreducible_Identifier.new(r31 & r30)
+        identifier_i = MM.Identifier.new(identifier_attr & class_i.R27())
+        
+        MM.Irreducible_Identifier.new(class_i.R31() & identifier_i.R30('Irreducible Identifier'))
         for attribute_name in Attribute_list:
+            
             attribute_attr = MM.Attribute.constraint(
                 {'Name' : attribute_name})
-            attribute_i = exactly_one(MM.Attribute.query(attribute_attr & r20))
-            r22_attribute = MM.Attribute.R22(attribute_i)
-            MM.Identifier_Attribute.new(r22_identifier & r22_attribute)
-        f = 0
+            attribute_i = exactly_one(MM.Attribute.query(attribute_attr & class_i.R20()))
+            
+            MM.Identifier_Attribute.new(identifier_i.R22() & attribute_i.R22())
         
     def instantiate_types(self):
         all_types = self.types()
@@ -169,84 +156,60 @@ class ModelInstantiator(ModelReader):
                     {'Name' : type_name})
                 MM.Type.new(type_attr)
 
-    def instantiate_rel(self, rel, subsystem_i, modeled_domain_i):
-        r15 = MM.Modeled_Domain.R15(modeled_domain_i)
+    def instantiate_rel(self, rel: dict, subsystem_i: MM.Subsystem.constraint, modeled_domain_i: MM.Modeled_Domain.constraint):
         rnum = rel['rnum']
         rnum_number = ('R', rnum[1:] if rnum[0] == 'R' else rnum[2:])
         element_attr = MM.Element.constraint({'Number' : rnum_number})
-        element_i = MM.Element.new(element_attr & r15)
-        r16 = MM.Element.R16(element_i, 'Subsystem Element')
-        r13 = MM.Subsystem.R13(subsystem_i)
-        subsystem_element_i = MM.Subsystem_Element.new(r13 & r16)
-        r14 = MM.Subsystem_Element.R14(subsystem_element_i, 'Relationship')
-        relationship_i = MM.Relationship.new(r14)
-        r150_relationship = MM.Relationship.R150(relationship_i)
+        element_i = MM.Element.new(element_attr & modeled_domain_i.R15())
+
+        subsystem_element_i = MM.Subsystem_Element.new(subsystem_i.R13() & element_i.R16('Subsystem Element'))
+        relationship_i = MM.Relationship.new(subsystem_element_i.R14('Relationship'))
         
         if rnum[0] == 'O':
             """ Ordinal Relationship """
-            r100 = MM.Relationship.R100(relationship_i, 'Ordinal Relationship')
+            
             ordinal_data = self.ordinal_table[rnum]
             
             class_i = self.query_class(modeled_domain_i, ordinal_data['class'])
-            r27 = MM.Class.R27(class_i)
-            r20 = MM.Class.R20(class_i)
-            r104 = MM.Class.R104(class_i)
+
             number = {'I' : 1, 'I2' : 2, 'I3' :3}[ordinal_data['id']]
             identifier_attr = MM.Identifier.constraint(
                 {'Number' : ('I', number)})
             
-            identifier_i = exactly_one(MM.Identifier.query(identifier_attr & r27))
-            
-            r107 = MM.Identifier.R107(identifier_i)
-            r22_identifier = MM.Identifier.R22(identifier_i)
+            identifier_i = exactly_one(MM.Identifier.query(identifier_attr & class_i.R27()))
             
             attribute_attr = MM.Attribute.constraint(
                 {'Name' : ordinal_data['ranking_attribute']})
-            attribute_i = exactly_one(MM.Attribute.query(attribute_attr & r20))
-            r22_attribute = MM.Attribute.R22(attribute_i)
+            attribute_i = exactly_one(MM.Attribute.query(attribute_attr & class_i.R20()))
             
-            identifier_attribute_i = exactly_one(MM.Identifier_Attribute.query(r22_identifier & r22_attribute))
-            r106 = MM.Identifier_Attribute.R106(identifier_attribute_i)
+            identifier_attribute_i = exactly_one(
+                MM.Identifier_Attribute.query(identifier_i.R22() & attribute_i.R22()))
             
             ordinal_relationship_attr = MM.Ordinal_Relationship.constraint(
                 {'Ascending perspective' : ordinal_data['ascending'],
                  'Descending perspective' : ordinal_data['descending']}
             )
             
-            MM.Ordinal_Relationship.new(ordinal_relationship_attr & r100 & r104 & r107 & r106)
+            MM.Ordinal_Relationship.new(
+                ordinal_relationship_attr & 
+                relationship_i.R100('Ordinal Relationship') & 
+                class_i.R104() & 
+                identifier_i.R107() & 
+                identifier_attribute_i.R106())
             
         elif 't_side' in rel:
-            r100 = MM.Relationship.R100(relationship_i, 'Association')
-            association_i = MM.Association.new(r100)
+            association_i = MM.Association.new(relationship_i.R100('Association'))
 
-            r119 = MM.Association.R119(association_i, 'Binary Association')
-            binary_association_i = MM.Binary_Association.new(r119)
-            r124 = MM.Binary_Association.R124(binary_association_i)
-            r125 = MM.Binary_Association.R125(binary_association_i)
-            r12_ = {'t_side' : r124, 'p_side' : r125}
-            
-            r155_formalizing_class_role = None
-            r157 = None
-            r15_ = None
-            
-            
+            binary_association_i = MM.Binary_Association.new(association_i.R119('Binary Association'))
+
             side_list = ['p_side', 't_side']
             create_formalizing_list = None
             
             if 'assoc_cname' in rel:
                 create_formalizing_list = [False, False]
                 class_i_association_class = self.query_class(modeled_domain_i, rel['assoc_cname'])
-                r120_class = MM.Class.R120(class_i_association_class)
-                r150_class = MM.Class.R150(class_i_association_class)
-                formalizing_class_role_i = MM.Formalizing_Class_Role.new(r150_relationship & r150_class) 
-                r151 = MM.Formalizing_Class_Role.R151(formalizing_class_role_i, 'Association Class')
-                r155_formalizing_class_role = MM.Formalizing_Class_Role.R155(formalizing_class_role_i)
-                
-                r120_association = MM.Association.R120(association_i)
-                association_class_i = MM.Association_Class.new(r120_class & r120_association & r151)
-                r158 = MM.Association_Class.R158(association_class_i)
-                r159 = MM.Association_Class.R159(association_class_i)
-                r15_ = {'t_side' : r158, 'p_side' : r159}
+                formalizing_class_role_i = MM.Formalizing_Class_Role.new(relationship_i.R150() & class_i_association_class.R150()) 
+                association_class_i = MM.Association_Class.new(class_i_association_class.R120() & association_i.R120() & formalizing_class_role_i.R151('Association Class'))
             else:
                 create_formalizing_list = [True, False]
                 # Check formalizing class
@@ -258,7 +221,7 @@ class ModelInstantiator(ModelReader):
             for side, create_formalizing in zip(side_list, create_formalizing_list):
                 perspective = rel[side]
                 class_i = self.query_class(modeled_domain_i, perspective['cname'])
-                r110 = MM.Class.R110(class_i)
+                
                 side_letter = {'t_side' : 'T', 'p_side' : 'P'}[side]
                 perspective_attr = MM.Perspective.constraint(
                     {'Side' : side_letter,
@@ -266,84 +229,73 @@ class ModelInstantiator(ModelReader):
                      'Phrase' : perspective['phrase'],
                      'Conditional' : perspective['mult'][-1] == 'c',
                      'Multiplicity' : perspective['mult'][0]})
-                perspective_i = MM.Perspective.new(perspective_attr & r110)
-                r121 = MM.Perspective.R121(perspective_i, 'Asymmetric Perspective')
-                asymmetric_perspective_i = MM.Asymmetric_Perspective.new(r121)
-                r105 = MM.Asymmetric_Perspective.R105(
-                    asymmetric_perspective_i, 
-                    side_letter + ' Perspective')
-                {'t_side' : MM.T_Perspective, 'p_side' : MM.P_Perspective}[side].new(r105 & r12_[side])
+                perspective_i = MM.Perspective.new(perspective_attr & class_i.R110())
+                asymmetric_perspective_i = MM.Asymmetric_Perspective.new(perspective_i.R121('Asymmetric Perspective'))
+
+                if side == 't_side':
+                    MM.T_Perspective.new(asymmetric_perspective_i.R105('T Perspective') & binary_association_i.R124())
+                else:
+                    MM.P_Perspective.new(asymmetric_perspective_i.R105('P Perspective') & binary_association_i.R125())
+                    
                 if create_formalizing:
-                    r150_class = MM.Class.R150(class_i)
-                    formalizing_class_role_i = MM.Formalizing_Class_Role.new(r150_relationship & r150_class) 
-                    r151 = MM.Formalizing_Class_Role.R151(formalizing_class_role_i, 'Referring Class')
-                    r155_formalizing_class_role = MM.Formalizing_Class_Role.R155(formalizing_class_role_i)
-                    referring_class_i = MM.Referring_Class.new(r151)
-                    r157 = MM.Referring_Class.R157(referring_class_i)
+                    formalizing_class_role_i = MM.Formalizing_Class_Role.new(relationship_i.R150() & class_i.R150()) 
+                    referring_class_i = MM.Referring_Class.new(formalizing_class_role_i.R151('Referring Class'))
                 else:
                     if 'assoc_cname' in rel:
                         reference_letter = side_letter
                     else:
                         reference_letter = 'R'
-                    r155_class = MM.Class.R155(class_i)
-                    r154 = MM.Perspective.R154(perspective_i)
-                    reference_i = self.instantiate_referential_attributes(modeled_domain_i, rnum, reference_letter, r155_class & r155_formalizing_class_role, side)
-                    r152 = MM.Reference.R152(reference_i, 'Association Reference')
-                    association_reference_i = MM.Association_Reference.new(r152 & r154)
+                    reference_i = self.instantiate_referential_attributes(
+                        modeled_domain_i, rnum, reference_letter, class_i.R155() & formalizing_class_role_i.R155(), side)
+                    association_reference_i = MM.Association_Reference.new(
+                        reference_i.R152('Association Reference') & perspective_i.R154())
                     if 'assoc_cname' in rel:
-                        r176 = MM.Association_Reference.R176(association_reference_i, 'Association Class Reference')
-                        association_class_reference_i = MM.Association_Class_Reference.new(r176)
-                        R153 = MM.Association_Class_Reference.R153(
-                            association_class_reference_i,
-                            side_letter + ' Reference')
-                        {'t_side' : MM.T_Reference, 'p_side' : MM.P_Reference}[side].new(R153 & r15_[side])
+                        association_class_reference_i = MM.Association_Class_Reference.new(
+                            association_reference_i.R176('Association Class Reference'))
+                        
+                        if side == 't_side':
+                            MM.T_Reference.new(association_class_reference_i.R153('T Reference') & association_class_i.R158())
+                        else:
+                            MM.P_Reference.new(association_class_reference_i.R153('P Reference') & association_class_i.R159())
+                            
                     else:
-                        r176 = MM.Association_Reference.R176(association_reference_i, 'Simple Association Reference')
-                        MM.Simple_Association_Reference.new(r176 & r157)
+                        MM.Simple_Association_Reference.new(
+                            association_reference_i.R176('Simple Association Reference') & 
+                            referring_class_i.R157())
                     
-                    
-
         else:
-            r100 = MM.Relationship.R100(relationship_i, 'Generalization')
             generalization_attr = MM.Generalization.constraint(
                 {'Superclass' :  rel['superclass']})
-            generalization_i = MM.Generalization.new(generalization_attr & r100)
+            generalization_i = MM.Generalization.new(generalization_attr & relationship_i.R100('Generalization'))
             class_i_superclass = self.query_class(modeled_domain_i, rel['superclass'])
-            r101_generalization = MM.Generalization.R101(generalization_i)
-            r101_superclass = MM.Class.R101(class_i_superclass)
-            r155_class = MM.Class.R155(class_i_superclass)
-            facet_i = MM.Facet.new(r101_superclass & r101_generalization)
-            r102 = MM.Facet.R102(facet_i, 'Superclass')
-            superclass_i = MM.Superclass.new(r102)
-            r103 = MM.Superclass.R103(superclass_i)
-            r170 = MM.Superclass.R170(superclass_i)
-            if len(MM.Generalization.query(generalization_i & r103)) != 1:
+
+            facet_i = MM.Facet.new(class_i_superclass.R101() & generalization_i.R101())
+
+            superclass_i = MM.Superclass.new(facet_i.R102('Superclass'))
+            if len(MM.Generalization.query(generalization_i & superclass_i.R103())) != 1:
                 raise ManaException() # Check R103!
             for subclass_name in rel['subclasses']:
                 class_i_subclass = self.query_class(modeled_domain_i, subclass_name)
-                r150_class = MM.Class.R150(class_i_subclass)
-                formalizing_class_role_i = MM.Formalizing_Class_Role.new(r150_relationship & r150_class) 
-                r151 = MM.Formalizing_Class_Role.R151(formalizing_class_role_i, 'Subclass')
-                r155_formalizing_class_role = MM.Formalizing_Class_Role.R155(formalizing_class_role_i)
-                r101_subclass = MM.Class.R101(class_i_subclass)
-                facet_i = MM.Facet.new(r101_subclass & r101_generalization)
-                r102 = MM.Facet.R102(facet_i, 'Subclass')
-                subclass_i = MM.Subclass.new(r102 & r151)
-                r156 = MM.Subclass.R156(subclass_i)
-                reference_i = self.instantiate_referential_attributes(modeled_domain_i, rnum, 'G', r155_class & r155_formalizing_class_role)
-                r152 = MM.Reference.R152(reference_i, 'Generalization Reference')
-                generalization_reference_i = MM.Generalization_Reference.new(r152 & r170 & r156)
+                formalizing_class_role_i = MM.Formalizing_Class_Role.new(relationship_i.R150() & class_i_subclass.R150()) 
+
+                facet_i = MM.Facet.new(class_i_subclass.R101() & generalization_i.R101())
+                subclass_i = MM.Subclass.new(facet_i.R102('Subclass') & formalizing_class_role_i.R151('Subclass'))
+                
+                reference_i = self.instantiate_referential_attributes(
+                    modeled_domain_i, rnum, 'G', class_i_superclass.R155() & formalizing_class_role_i.R155())
+
+                generalization_reference_i = MM.Generalization_Reference.new(
+                    reference_i.R152('Generalization Reference') & superclass_i.R170() & subclass_i.R156())
             
     def instantiate_referential_attributes(self, modeled_domain_i, rnum, ref_letter : str, r155, side=None):
         reference_attr = MM.Reference.constraint({'Ref' : ref_letter})
         reference_i = MM.Reference.new(reference_attr & r155)
-        r23 = MM.Reference.R23(reference_i)
+        
         to_class_name = MM.Reference.value(reference_i, 'To class')
         class_i_to = self.query_class(modeled_domain_i, to_class_name)
-        r20_to = MM.Class.R20(class_i_to)
+        
         from_class_name = MM.Reference.value(reference_i, 'From class')
         class_i_from = self.query_class(modeled_domain_i, from_class_name)
-        r20_from = MM.Class.R20(class_i_from)
         
         ref_data_origin = self.referential_table[to_class_name]['inclusion'][rnum]
         if ref_data_origin['has_variants']:
@@ -358,19 +310,18 @@ class ModelInstantiator(ModelReader):
         # From class {I, I2, /R21/Attribute.Class, R23}
         # To class {I, /R21c/Identifier Attribute.Class, R23}
         
-        def attribute_by_name(r20, attribute_name):
+        def attribute_by_name(class_i: MM.Class.constraint, attribute_name: str) -> MM.Attribute.constraint:
             attribute_attr = MM.Attribute.constraint({'Name' : attribute_name})
-            return exactly_one(MM.Attribute.query(attribute_attr & r20))
+            return exactly_one(MM.Attribute.query(attribute_attr & class_i.R20()))
             
         number = {'I' : 1, 'I2' : 2, 'I3' :3}[ref_data['id']]
         identifier_attr = MM.Identifier_Attribute.constraint({'Identifier' : ('I', number)})
         for to_attribute, from_attribute in ref_data['ref_map'].items():
-            attribute_i_to = attribute_by_name(r20_to, to_attribute)
-            r22_attribute = MM.Attribute.R22(attribute_i_to)
-            identifier_attribute_i = exactly_one(MM.Identifier_Attribute.query(identifier_attr & r22_attribute))
-            r21_identifier_attribute = MM.Identifier_Attribute.R21(identifier_attribute_i)
-            attribute_i_from = attribute_by_name(r20_from, from_attribute)
-            r21_attribute = MM.Attribute.R21(attribute_i_from)
-            MM.Attribute_Reference.new(r23 & r21_identifier_attribute & r21_attribute)
+            attribute_i_to = attribute_by_name(class_i_to, to_attribute)
+            identifier_attribute_i = exactly_one(MM.Identifier_Attribute.query(identifier_attr & attribute_i_to.R22()))
+
+            attribute_i_from = attribute_by_name(class_i_from, from_attribute)
+
+            MM.Attribute_Reference.new(reference_i.R23() & identifier_attribute_i.R21() & attribute_i_from.R21())
 
         return reference_i
