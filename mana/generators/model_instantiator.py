@@ -69,10 +69,16 @@ class ModelInstantiator(ModelReader):
         r = 0
         
     def query_subsystem(self, modeled_domain_i, subsystem_name : str):
-        r1 = MM.Modeled_Domain.R1(modeled_domain_i)
+        r3 = MM.Modeled_Domain.R3(modeled_domain_i)
+        domain_partition_i_set = MM.Domain_Partition.query(r3)
         subsystem_attr = MM.Subsystem.constraint({
             'Name' : subsystem_name})
-        return exactly_one(MM.Subsystem.query(subsystem_attr & r1))
+        for domain_partition_i in MM.Domain_Partition.query(r3):
+            r1 = MM.Domain_Partition.R1(domain_partition_i)
+            subsystem_i_set = MM.Subsystem.query(subsystem_attr & r1)
+            if len(subsystem_i_set):
+                return exactly_one(subsystem_i_set)
+        raise ManaException()
     
     def query_class(self, modeled_domain_i, class_name : str):
         domain_name = MM.Modeled_Domain.value(modeled_domain_i, 'Name')
@@ -82,20 +88,23 @@ class ModelInstantiator(ModelReader):
         return exactly_one(MM.Class.query(class_attr))
         
     def instantiate_subsystem(self, subsystem, modeled_domain_i):
-        r1 = MM.Modeled_Domain.R1(modeled_domain_i)
+        r3 = MM.Modeled_Domain.R3(modeled_domain_i)
+        # ToDo: add real values for 'Number'
+        
+        min_num = min([int(''.join([ d for d in rel['rnum'] if d.isdigit()])) for rel in subsystem.rels ])
+            
+        
+        domain_partition_attr = MM.Domain_Partition.constraint(
+            {'Number' : min_num})
+        
+        domain_partition_i = MM.Domain_Partition.new(domain_partition_attr & r3)
+        r1 = MM.Domain_Partition.R1(domain_partition_i)
         name = subsystem.name['subsys_name']
         alias = subsystem.name['abbr']
         subsystem_attr = MM.Subsystem.constraint(            
             {'Name' : name,
              'Alias' : name if alias is None else alias})
         subsystem_i = MM.Subsystem.new(subsystem_attr & r1)
-        r3 = MM.Subsystem.R3(subsystem_i)
-        # ToDo: add real values for 'Floor', 'Ceiling'    
-        subsystem_numbering_range_attr = MM.Subsystem_Numbering_Range.constraint(            
-            {'Floor' : 0,
-             'Ceiling' : 100})
-        subsystem_numbering_range_i = MM.Subsystem_Numbering_Range.new(
-            subsystem_numbering_range_attr & r3)
         
     def instantiate_class(self, _class, subsystem_i, modeled_domain_i):
         r15 = MM.Modeled_Domain.R15(modeled_domain_i)
@@ -175,7 +184,37 @@ class ModelInstantiator(ModelReader):
         
         if rnum[0] == 'O':
             """ Ordinal Relationship """
-            raise ManaException() # ToDo 
+            r100 = MM.Relationship.R100(relationship_i, 'Ordinal Relationship')
+            ordinal_data = self.ordinal_table[rnum]
+            
+            class_i = self.query_class(modeled_domain_i, ordinal_data['class'])
+            r27 = MM.Class.R27(class_i)
+            r20 = MM.Class.R20(class_i)
+            r104 = MM.Class.R104(class_i)
+            number = {'I' : 1, 'I2' : 2, 'I3' :3}[ordinal_data['id']]
+            identifier_attr = MM.Identifier.constraint(
+                {'Number' : ('I', number)})
+            
+            identifier_i = exactly_one(MM.Identifier.query(identifier_attr & r27))
+            
+            r107 = MM.Identifier.R107(identifier_i)
+            r22_identifier = MM.Identifier.R22(identifier_i)
+            
+            attribute_attr = MM.Attribute.constraint(
+                {'Name' : ordinal_data['ranking_attribute']})
+            attribute_i = exactly_one(MM.Attribute.query(attribute_attr & r20))
+            r22_attribute = MM.Attribute.R22(attribute_i)
+            
+            identifier_attribute_i = exactly_one(MM.Identifier_Attribute.query(r22_identifier & r22_attribute))
+            r106 = MM.Identifier_Attribute.R106(identifier_attribute_i)
+            
+            ordinal_relationship_attr = MM.Ordinal_Relationship.constraint(
+                {'Ascending perspective' : ordinal_data['ascending'],
+                 'Descending perspective' : ordinal_data['descending']}
+            )
+            
+            MM.Ordinal_Relationship.new(ordinal_relationship_attr & r100 & r104 & r107 & r106)
+            
         elif 't_side' in rel:
             r100 = MM.Relationship.R100(relationship_i, 'Association')
             association_i = MM.Association.new(r100)
