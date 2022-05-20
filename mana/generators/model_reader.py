@@ -1,7 +1,7 @@
 import pprint
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from flatland.input.model_parser import ModelParser, Subsystem
 from flatland.flatland_exceptions import ModelParseError
 from mana.warnings_and_exceptions import *
@@ -628,11 +628,13 @@ class ModelReader:
                                 big_set.add(node)
                                 attribute_reference_table[node] = big_set
 
+
         type_index_table = dict()
         index_node_table = dict()
 
+        # Introducing an index used for each set of attributes sharing the
+        # same type based on logic given by referential attribute dependencies.
         i = 0
-        cached_type_table = dict()
         for class_attribute in self.class_attribute_table.keys():
             if class_attribute not in type_index_table:
                 type_index = i
@@ -641,66 +643,109 @@ class ModelReader:
                 for node in attribute_reference_table[class_attribute]:
                     type_index_table[node] = type_index
 
-        type_called = set()
+        # Introducing union_task_table as a refined version of union_table 
+        # where the class, attribute tuple pair is replaced by the new index. 
+        # This enables a fast lookup for determent if a index has an union 
+        # type definition.
+        union_task_table = dict()
+        for union_type, rnum_type_part in union_table.items():
+            task_list = union_task_table.setdefault(type_index_table[union_type], [])
+            for rnum, type_part_list in rnum_type_part.items():
+                task_list.append(type_part_list)
 
-        def type_at_index(index) -> set:
-            return_type = cached_type_table.get(index, set())
-            if return_type:
-                return return_type  # No need to run this again if there is a value
-            if class_attribute in type_called:
-                return set()  # type loop, the original call will or will not get a valid value
-
-            def add_and_check(new_type: set):
-                if not new_type:
-                    raise ManaException()  # Error empty input
-                nonlocal return_type
-                if not return_type:
-                    return_type = set(new_type)
-                    # save value for fast cache
-                    cached_type_table[index] = new_type
-                else:
-                    if new_type != return_type:
+        # Walking through all attributes in an indexes and determent if 
+        # there is an explicit type declaration.
+        named_type_table = dict()
+        for type_index, node_set in index_node_table.items():
+            for node_at_index in node_set:
+                new_type = self.class_attribute_table[node_at_index].get('type')
+                if new_type is not None:
+                    if new_type != named_type_table.setdefault(type_index, new_type):
                         raise ManaException()  # error multiple unequal type definitions  == BAD!
-                    # else all is OK!
+        
+        # The type_at_index function is retrieving the type for an index. 
+        # It will return the full expanded union type definition. 
+        # Thus if an index both an union type definition and an explicit 
+        # named type declaration only the union type definition is provided.
+        cached_type_table = dict()
+        def type_at_index(index) -> set:
+            type_called = set()
+            
+            # Help function to the type_at_index function.
+            def derive_inner_types(index: int) -> Iterator[set]:
+                return_type = cached_type_table.get(index, set())
+                if return_type:
+                    yield return_type  # No need to run this again if there is a value
+                elif index in type_called:
+                    yield set()  # type loop, the original call will or will not get a valid value
+                else:
+                    if index in union_task_table:
+                        type_called.add(index) # Add guard
+                        for variant in union_task_table[index]:
+                            return_type = set()
+                            for part in variant:
+                                for part_variant in derive_inner_types(type_index_table[part]):
+                                    # Note that in the type_at_index function these part_variants 
+                                    # is error handled if they are not equal. The thought is that 
+                                    # if this recursive lookup is stopped by the type_called guard 
+                                    # there is a chance that the result is still okay at the 
+                                    # type_at_index function level. But it is likely that the guard 
+                                    # might cause missing information further down in the call depth. 
+                                    # Hence, a union is used as an alternative in the 
+                                    # derive_inner_types helper function.
+                                    return_type |= part_variant
+                            yield return_type
+                        type_called.remove(index) # Remove guard
+                    elif index in named_type_table:
+                        yield {named_type_table[index]}
 
-            type_called.add(index) # Add guard
-
-            for node_at_index in index_node_table[index]:
-                if node_at_index in union_table:
-                    union_type = set()
-                    for rnum, node_set in union_table[node_at_index].items():
-                        for node in node_set:
-                            union_type |= type_at_index(type_index_table[node])
-                    add_and_check(union_type)
-
-                if 'type' in self.class_attribute_table[node_at_index]:
-                    add_and_check({self.class_attribute_table[node_at_index]['type']})
-
-            type_called.remove(index) # Remove guard
+            return_type: set = set()
+            for type_variant in derive_inner_types(index):
+                if not return_type:
+                    return_type = type_variant
+                elif type_variant != return_type:
+                    raise ManaException()  # error multiple unequal type definitions  == BAD!
+                else:
+                    return_type = type_variant
+                
             if not return_type:
                 e_data = [(c, a, self.class_to_subsys[c]) for c, a in index_node_table[index]]
                 raise ManaTypeNotDefiedException(e_data)
+            
+            cached_type_table[index] = return_type
             return return_type
-                
+        # Checking if there is an explicit named type declaration on the union type
+        named_union_table = dict()
+        for named_union in set(union_task_table.keys()) & set(named_type_table.keys()):
+            key = frozenset(type_at_index(named_union))
+            if key in named_union_table:
+                # Multiple named unions with the same signature. This is probably not 
+                # an real error but somthing needs to change if this corner case is real
+                raise ManaException()
+            named_union_table[key] = named_type_table[named_union]
+
+        # Save the result
         unique_type = set()
-        for type_index, node_set in index_node_table.items():
-            type_for_save_list = list(type_at_index(type_index))
-            type_for_save_list.sort()
-            if len(type_for_save_list) == 0:
-                raise ManaException() 
-            elif len(type_for_save_list) == 1:
-                result = type_for_save_list[0]
-                attribute_key = 'type'
-            else:
-                result = type_for_save_list
-                attribute_key = 'union_type'
+        def add_type(_type, attribute_key, node_set):
+            type_list = list(_type)
+            result = type_list[0] if len(_type) == 1 else sorted(type_list)
             for node in node_set:
                 self.class_attribute_table[node][attribute_key] = result
-            type_for_save_tuple = tuple(type_for_save_list)
-            if type_for_save_tuple not in unique_type:
-                unique_type.add(type_for_save_tuple)
+            if _type not in unique_type:
+                unique_type.add(_type)
                 self.type_table[attribute_key].append(result)
-                    
+        
+        for type_index, node_set in index_node_table.items():
+            type_set = frozenset(type_at_index(type_index))
+            if len(type_set) == 0:
+                raise ManaException() 
+            if len(type_set) > 1:
+                add_type(type_set, 'union_type', node_set)
+                if type_set in named_union_table:
+                    add_type(frozenset({named_union_table[type_set]}), 'type', node_set)
+            else:
+                add_type(type_set, 'type', node_set)
+
                 
                     
                 
