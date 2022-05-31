@@ -4,6 +4,7 @@
         "../../../shlaer-mellor-metamodel/class-metamodel/class-and-attribute-subsystem/class-attribute.xmm",
         "../../../shlaer-mellor-metamodel/class-metamodel/relationship-subsystem/rel.xmm",
         "../../../shlaer-mellor-metamodel/class-metamodel/formalization-subsystem/form.xmm",
-        "../../../shlaer-mellor-metamodel/state-metamodel/state-subsystem/state.xmm"
+        "../../../shlaer-mellor-metamodel/state-metamodel/state-subsystem/state.xmm",
+        "../../../shlaer-mellor-metamodel/state-metamodel/event-subsystem/event.xmm"
     ]
 }

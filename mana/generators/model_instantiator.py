@@ -1,9 +1,11 @@
 import pprint
 import sys
 import meta_model as MM
-from typing import TypeVar
+from typing import TypeVar, Optional
 from pathlib import Path
-from mana.generators.model_reader import ModelReader
+from mana.generators.model_reader import ModelReader, StateBlock, EventSpec, StateTransition
+from flatland.input.statemodel_parser import StateModel
+from flatland.input.statemodel_visitor import Parameter
 from mana.warnings_and_exceptions import *
 
 T = TypeVar('T')
@@ -41,13 +43,20 @@ class ModelInstantiator(ModelReader):
         for subsystem in self.subsystems:
             domain = subsystem.name['domain_name']
             if domain not in domains:
-                domains[domain] = []
-            domains[domain].append(subsystem)
+                domains[domain] = {'subsystems' : [],
+                                   'statemodels' : []}
+            domains[domain]['subsystems'].append(subsystem)
         
-        for domain, subsystems in domains.items():
-            self.instantiate_domain(domain, subsystems)
+        for statemodel in self.statemodels:
+            domain = statemodel.domain
+            if domain not in domains:
+                raise ManaException() # no state models without subsystem
+            domains[domain]['statemodels'].append(statemodel)
+            
+        for domain, data in domains.items():
+            self.instantiate_domain(domain, data['subsystems'], data['statemodels'])
                 
-    def instantiate_domain(self, domain_name : str, subsystem_list : list):
+    def instantiate_domain(self, domain_name: str, subsystem_list: list, state_model_list: list):
         domain_attr = MM.Domain.constraint(
             {'Name' : domain_name, 
              'Alias' : domain_name})  #ToDo: fix alias to domain
@@ -67,6 +76,9 @@ class ModelInstantiator(ModelReader):
                 modeled_domain_i, subsystem.name['subsys_name'])
             for rel in subsystem.rels:
                 self.instantiate_rel(rel, subsystem_i, modeled_domain_i)
+        
+        for state_model in state_model_list:        
+            self.instantiate_state_model(state_model, modeled_domain_i)
                 
         
     def query_subsystem(self, modeled_domain_i: MM.Modeled_Domain.constraint, subsystem_name : str) -> MM.Subsystem.constraint:
@@ -85,7 +97,26 @@ class ModelInstantiator(ModelReader):
             'Name' : class_name,
             'Domain' : domain_name})
         return exactly_one(MM.Class.query(class_attr))
+    
+    def query_state(self,
+                    state_model_i: MM.State_Model.constraint,
+                    state_name: str) -> MM.State.constraint:
         
+        state_attr = MM.State.constraint(
+            {'Name': state_name,
+             'State model':state_model_i['Name'],
+             'Domain':state_model_i['Domain']})
+        return exactly_one(MM.State.query(state_attr))
+    
+    def rnum_number(self, rnum: str) -> tuple[str, int]:
+        return ('R', int(rnum[1:] if rnum[0] == 'R' else rnum[2:]))
+    
+    def query_relationship(self, modeled_domain_i: MM.Modeled_Domain.constraint, rnum : str) -> MM.Relationship.constraint:
+        relationship_attr = MM.Relationship.constraint(
+            { 'Rnum' : self.rnum_number(rnum),
+             'Domain' : modeled_domain_i['Name']})
+        return  exactly_one(MM.Relationship.query(relationship_attr))
+    
     def instantiate_subsystem(self, subsystem, modeled_domain_i: MM.Modeled_Domain.constraint):
         
         min_num = min([int(''.join([ d for d in rel['rnum'] if d.isdigit()])) for rel in subsystem.rels ])        
@@ -158,8 +189,7 @@ class ModelInstantiator(ModelReader):
 
     def instantiate_rel(self, rel: dict, subsystem_i: MM.Subsystem.constraint, modeled_domain_i: MM.Modeled_Domain.constraint):
         rnum = rel['rnum']
-        rnum_number = ('R', rnum[1:] if rnum[0] == 'R' else rnum[2:])
-        element_attr = MM.Element.constraint({'Number' : rnum_number})
+        element_attr = MM.Element.constraint({'Number' : self.rnum_number(rnum)})
         element_i = MM.Element.new(element_attr & modeled_domain_i.R15())
 
         subsystem_element_i = MM.Subsystem_Element.new(subsystem_i.R13() & element_i.R16('Subsystem Element'))
@@ -225,7 +255,7 @@ class ModelInstantiator(ModelReader):
                 side_letter = {'t_side' : 'T', 'p_side' : 'P'}[side]
                 perspective_attr = MM.Perspective.constraint(
                     {'Side' : side_letter,
-                     'Rnum' : rnum_number,
+                     'Rnum' : self.rnum_number(rnum),
                      'Phrase' : perspective['phrase'],
                      'Conditional' : perspective['mult'][-1] == 'c',
                      'Multiplicity' : perspective['mult'][0]})
@@ -325,3 +355,141 @@ class ModelInstantiator(ModelReader):
             MM.Attribute_Reference.new(reference_i.R23() & identifier_attribute_i.R21() & attribute_i_from.R21())
 
         return reference_i
+
+    def instantiate_state_model(self, state_model: StateModel, modeled_domain_i: MM.Modeled_Domain.constraint):
+        
+        lifecycle_i = None
+        
+        if state_model.lifecycle:
+            class_i = self.query_class(modeled_domain_i, state_model.lifecycle['class'])
+            
+            state_model_attr = MM.State_Model.constraint(
+                {'Domain': modeled_domain_i['Name'],
+                 'Name': class_i['Name']})
+            
+            state_model_i = MM.State_Model.new(state_model_attr)
+            lifecycle_i = MM.Lifecycle.new(class_i.R500() & state_model_i.R502('Lifecycle'))
+
+        else:
+            relationship_i = self.query_relationship(modeled_domain_i, state_model.assigner['rel'])
+            association_i = exactly_one(MM.Association.query(relationship_i.R100('Association')))
+            
+            state_model_attr = MM.State_Model.constraint(
+                {'Domain': modeled_domain_i['Name'],
+                 'Name': association_i['Rnum']})
+            state_model_i = MM.State_Model.new(state_model_attr)
+            
+            assigner_i = MM.Assigner.new(association_i.R501() & state_model_i.R502('Assigner'))
+            MM.Single_Assigner.new(assigner_i.R514('Single Assigner'))
+            
+        for state in state_model.states:
+            self.instantiate_state(state, modeled_domain_i, state_model_i, lifecycle_i)
+            
+        for event in state_model.events:
+            self.instantiate_events(event, state_model_i)
+    
+    def instantiate_events(self, 
+                           event: EventSpec, 
+                           state_model_i: MM.State_Model.constraint):
+        
+        event_attr = MM.Event.constraint(
+            {'Name': event.name,
+             'Subsystem element': state_model_i['Name'],
+             'Domain': state_model_i['Domain']})
+
+        event_i = MM.Event.new(event_attr)
+        effective_event_i = MM.Effective_Event.new(event_i.R560('Effective Event'))
+        
+        for transition in event.transitions:
+            self.instantiate_event_response(transition, effective_event_i, state_model_i)
+            
+        event_specification_attr = MM.Event_Specification.constraint(
+            {'Name': event.name,
+             'Subsystem element': state_model_i['Name'],
+             'Domain': state_model_i['Domain']})
+        event_specification_i = MM.Event_Specification.new(event_specification_attr)
+        
+        for parameter in event.signature:
+            self.instantiate_event_parameter(parameter, event_specification_i)
+        
+        monomorphic_event_specification_i = MM.Monomorphic_Event_Specification.new(
+            event_specification_i.R550('Monomorphic Event Specification') & state_model_i.R565())
+        
+        monomorphic_event_i = MM.Monomorphic_Event.new(
+            effective_event_i.R554('Monomorphic Event') & monomorphic_event_specification_i.R557())
+    
+    def instantiate_event_parameter(self, 
+                                    parameter: Parameter, 
+                                    event_specification_i: MM.Event_Specification.constraint):
+        event_parameter_attr = MM.Event_Parameter.constraint(
+            {'Name' : parameter.name,
+             'Type' : parameter.type})
+        event_parameter_i = MM.Event_Parameter.new(event_parameter_attr & event_specification_i.R563())
+    
+    def instantiate_event_response(self, 
+                                   transition : StateTransition, 
+                                   effective_event_i : MM.Effective_Event.constraint, 
+                                   state_model_i: MM.State_Model.constraint):
+
+        from_state_i = self.query_state(state_model_i, transition.origin)   
+        event_response_i = MM.Event_Response.new(effective_event_i.R505() & from_state_i.R505())
+        
+        if transition.type == 'transition':
+            to_state_i = self.query_state(state_model_i, transition.to)
+            
+            transition_i = MM.Transition.new(event_response_i.R506('Transition') & to_state_i.R507())
+        else:
+            non_transition_attr = MM.Non_Transition.constraint(
+                {'Behavior' : {'ignore': 'IGN', 'canthappen' : 'CH'}[transition.type],
+                 'Reason': ''})
+            non_transition_i = MM.Non_Transition.new(non_transition_attr & 
+                                                     event_response_i.R506('Non Transition'))
+            
+        
+    def instantiate_state(self, 
+                          state: StateBlock, 
+                          modeled_domain_i: MM.Modeled_Domain.constraint, 
+                          state_model_i: MM.State_Model.constraint, 
+                          lifecycle_i: Optional[MM.Lifecycle.constraint]):
+ 
+        state_activity_i = self.instantiate_state_activity(state.activity, modeled_domain_i)
+        
+        state_attr = MM.State.constraint(
+            {'Name': state.name,
+                'State model': state_model_i['Name'],
+                'Domain': modeled_domain_i['Name']})
+        
+        state_i = MM.State.new(state_attr)
+        
+        if state.type in ['creation']:
+            if lifecycle_i is None:
+                raise ManaException() # Error Initial Pseudo State is not valid if the State Model a Assigner
+            
+            MM.Initial_Pseudo_State.new(state_i.R510('Initial Pseudo State') & lifecycle_i.R508())
+        else:
+            state_activity_i = self.instantiate_state_activity(state.activity, modeled_domain_i)
+            real_state_i =  MM.Real_State.new(state_i.R510('Real State') & state_activity_i.R504())
+            
+            if state.type in ['normal']:
+                MM.Non_Deletion_State.new(real_state_i.R511('Non Deletion State') & state_model_i.R503())
+            elif state.type in ['deletion']:
+                
+                if lifecycle_i is None:
+                    raise ManaException() # Error Deletion State is not valid if the State Model a Assigner
+
+                MM.Deletion_State.new(real_state_i.R511('Deletion State') &  lifecycle_i.R513())
+            else:
+                raise ManaException() # Error not valid state type
+
+    def instantiate_state_activity(self, activity, modeled_domain_i: MM.Modeled_Domain.constraint):
+        
+        # Todo make better Activity code... (waiting on Flow Subsystem)
+        # To be able to handle the moment 22 created by needing state models to receive events that are provided 
+        # from (typically) a state model. The Activity should be created in two passes. The first pass is when 
+        # the state model is created when only a shell is needed. Next pass the actions and input/output is defined. 
+        id_numb = len(MM.State_Activity.all()) + 1
+        
+        state_activity_attr = MM.State_Activity.constraint(
+                {'ID': id_numb,
+                 'Domain': modeled_domain_i['Name']})
+        return MM.State_Activity.new(state_activity_attr)

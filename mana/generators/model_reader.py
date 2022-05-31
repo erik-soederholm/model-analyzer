@@ -2,14 +2,21 @@ import pprint
 import sys
 from pathlib import Path
 from typing import Any, Iterator
+from collections import namedtuple
 from flatland.input.model_parser import ModelParser, Subsystem
+from flatland.input.statemodel_parser import StateModelParser, StateModel 
+from flatland.input.statemodel_visitor import StateBlock as FlatlandStateBlock, EventSpec as FlatlandEventSpec
 from flatland.flatland_exceptions import ModelParseError
 from mana.warnings_and_exceptions import *
 
+StateBlock = namedtuple('StateBlock', 'name type activity transitions')
+StateTransition = namedtuple('StateTransition', 'origin type to event')
+EventSpec = namedtuple('EventSpec', 'name type signature transitions')
 
 class ModelReader:
     def __init__(self, jobs: dict):
         self.subsystems: list[Subsystem] = []
+        self.input_statemodels: list[StateModel] = []
         self.jobs = jobs
 
     def parse(self):
@@ -20,11 +27,20 @@ class ModelReader:
             except ModelParseError as flatland_e:
                 raise ManaParserException(
                     flatland_e.model_file, "class model", flatland_e.e)
+                
+        for parse_file in self.jobs['statemodels']:
+            parse_job = StateModelParser(model_file_path=parse_file, debug=False)
+            try:
+                self.input_statemodels.append(parse_job.parse())
+            except ModelParseError as flatland_e:
+                raise ManaParserException(
+                    flatland_e.model_file, "state model", flatland_e.e)
 
         # Print parsed data to file
         with open("parse_data.txt", "w") as data_file:
             pp = pprint.PrettyPrinter(indent=2, stream=data_file)
-            pp.pprint(dict(self.subsystems[0]._asdict()))
+            if len(self.input_statemodels) > 0:
+                pp.pprint(dict(self.input_statemodels[0]._asdict()))
 
     def id(self, input: dict):
         """ pure function """
@@ -62,12 +78,14 @@ class ModelReader:
         self.ordinal_table = dict()
         self.class_attribute_table = dict()
         self.type_table = {'type' : [], 'union_type' : []}
+        self.statemodels = []
         
         # run interpret functions
         self.interpret_common()
         self.interpret_relation_navigation()
         self.interpret_referential()
         self.interpret_types()
+        self.interpret_statemodels()
 
     def interpret_common(self):
         subsystem_table = dict()
@@ -748,8 +766,79 @@ class ModelReader:
 
                 
                     
+    def interpret_statemodels(self):
+        self.statemodels = [self.interpret_statemodel(input_statemodel) for input_statemodel in self.input_statemodels]
                 
                 
+    def interpret_statemodel(self, input : StateModel) -> StateModel:
+        states=self.interpret_state(input.states, input.events.values())
+
+        return StateModel(
+            domain=input.domain, 
+            lifecycle=input.lifecycle, 
+            assigner=input.assigner,
+            events=self.interpret_events(input.events.values(), states),
+            states=states,
+            metadata=input.metadata)
+        
+    def interpret_events(self, input: list[FlatlandEventSpec], states: list[StateBlock] ) -> list[EventSpec]:
+        event2transitions: dict[str,list[StateTransition]] = dict()
+        
+        for s in states:
+            for t in s.transitions:
+                event2transitions.setdefault(t.event, []).append(t)
                 
+        return [EventSpec(name=ei.name, 
+                          type=ei.type, 
+                          signature=ei.signature, 
+                          transitions=event2transitions[ei.name]
+                          ) for ei in input]
+        
+    def interpret_state(self, input: list[FlatlandStateBlock], events: list[FlatlandEventSpec]) -> list[StateBlock]:
+        initial_transitions = []
+        output = []
+        for input_stat_block in input:
+            next_type = input_stat_block.type
+            if next_type in ['creation']:
+                next_type = 'normal'
+                initial_transitions.append([input_stat_block.creation_event, input_stat_block.name])
                 
+            output.append(StateBlock(
+                name=input_stat_block.name,
+                type=next_type,
+                activity=input_stat_block.activity,
+                transitions=self.interpret_transitions(input_stat_block.name, input_stat_block.transitions, events)))
+        if initial_transitions:
+            ips_name = '#¥$@ Initial Pseudo State @$¥#'
+            output.insert(0, StateBlock(
+                name=ips_name, # using special characters to be unique
+                type='creation',
+                activity=None,
+                transitions=self.interpret_transitions(ips_name, initial_transitions, events)))
+            
+        return output
+    
+    def interpret_transitions(self, origin: str, transitions: list, all_events: list[FlatlandEventSpec]) -> list[StateTransition]:
+        output = []
+        all_event_set = {e.name for e in all_events}
+        explicit_event_set = set()
+        for transition in transitions:
+            event = transition[0]
+            if len(transition) == 1:
+                output.append(StateTransition(event=event, origin=origin, to=None, type="ignore"))
+            else:
+                output.append(StateTransition(event=event, origin=origin, to=transition[1], type="transition"))
+            explicit_event_set.add(event)
+            
+        if explicit_event_set - all_event_set:
+            raise ManaException() # Error, event not known!
+        
+        for illegal_event in all_event_set - explicit_event_set:
+            output.append(StateTransition(event=illegal_event, origin=origin, to=None, type="canthappen"))
+            
+        return output
+
+
+
+        
         

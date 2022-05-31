@@ -7,40 +7,59 @@ import time
 from mana.generators.meta_model_generator import MetaModelGenerator
 from mana.warnings_and_exceptions import ManaException
 
+
+prev_time = 0.0
+
+def start_time():
+    global prev_time
+    prev_time = time.time()
+
+def print_time(message: str):
+    global prev_time
+    new_time = time.time()
+    print(message, round(new_time - prev_time, 0), 'secs', end='\n')
+    prev_time = new_time
+
+def json_job(job_path: Path):
+    with open(job_path) as job_file:
+        data_in_file = json.load(job_file)
+    
+    path_at_file = job_path.resolve().parent
+    if 'subsystems' not in data_in_file:
+        raise ManaException()
+    
+    out = {
+        'subsystems': [path_at_file / subsystem for subsystem in data_in_file['subsystems']],
+        'statemodels': [path_at_file / subsystem for subsystem in data_in_file.get('statemodels', [])]}
+       
+    return out
+
 def main():
     examples_path = Path(__file__).parent / "examples"
-    manifest_path = examples_path / "shlaer-mellor-metamodel.json"
-    with open(manifest_path) as manifest_file:
-        manifest = json.load(manifest_file)
-        
-    job = {'subsystems': []}
-    ex = {'subsystems': []}
-    if 'subsystems' in manifest:
-        first = True
-        for subsystem in manifest['subsystems']:
-            if first:
-                ex['subsystems'].append(examples_path / subsystem)
-                
-            job['subsystems'].append(examples_path / subsystem)
-            first = False
-    mmg = MetaModelGenerator(job)   
+    
+    meta_model_path = examples_path / "shlaer-mellor-metamodel.json"
+    # my_model_path = meta_model_path
+    my_model_path = examples_path / 'test-model.json'
     
     
     try:
-        start_time = time.time()
+        start_time()
+        mmg = MetaModelGenerator(json_job(meta_model_path))  
         mmg.parse()
         mmg.interpret()
         mmg.generate()
+        print_time('Generatening meta model')
         
         from mana.generators.model_instantiator import ModelInstantiator
-        mi = ModelInstantiator(job)
+        # By loading ModelInstantiator first now the latest genarated 
+        # meta-model will be used 
+        
+        mi = ModelInstantiator(json_job(my_model_path))
         mi.parse()
         mi.interpret()
-        instantiate_start_time=time.time()
-        print("Pre instantiate:",round(instantiate_start_time - start_time,0),'secs',end='\n')
         mi.instantiate()
-        end_time = time.time()
-        print("Instantiate:",round(end_time - instantiate_start_time,0),'secs',end='\n')
+        print_time('Instantiate model')
+
     except ManaException as e:
         if e.exit():
             sys.exit(e)
